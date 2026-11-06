@@ -1,0 +1,62 @@
+# Parameters for hw3_slam (EKF SLAM). There is NO tag map here: the robot
+# builds it. Map frame = the robot's start pose: origin at the start
+# position, +x = starting heading, +y = 90 deg to its left.
+hw3_slam:
+  ros__parameters:
+    # Path. 'square', 'octagon', or 'square,octagon' (one run, same map).
+    # Both paths start at (0, 0) and go counter-clockwise (left turns), so
+    # the robot needs room AHEAD and to its LEFT. Square = n x n; the
+    # octagon with side m is m * 2.41 wide.
+    paths: "square"
+    square_size: 1.0          # n (m)
+    octagon_side: 0.6         # m (m) -> about 1.45 m across
+    loops: 1                  # times around each path (try 1, then 2 or 3)
+
+    # Tags / camera (same as HW2)
+    tag_size: 0.163           # edge of the BLACK square in meters (6.75 in)
+    tag_family: "36h11"
+    max_tag_dist: 3.0         # ignore tags farther than this (m)
+    max_reproj_err: 3.0       # px
+    camera_offset_x: 0.10     # camera ahead of the robot center (m)
+    camera_offset_y: 0.0
+    image_is_rectified: false
+
+    # Motion, copied from HW2's calibration
+    drive_left: 0.32
+    drive_right: 0.40
+    drive_speed: 0.495
+    turn_cmd: 0.3
+    turn_rate: 2.051
+    turn_rate_left: 1.963
+    turn_rate_right: 2.138
+    search_cmd: 0.3
+    search_step: 0.35
+    use_imu: false
+    imu_yaw_sign: 1.0
+
+    # Control loop. Shorter steps = more tag sightings = better map.
+    step_time: 0.5            # s of driving per step (~0.25 m)
+    settle_time: 0.4
+    pos_tol: 0.05
+    reach_radius: 0.15
+    ang_tol: 0.10
+    heading_tol: 0.12
+    max_blind_steps: 3
+    max_steps_per_waypoint: 40
+    log_dir: "/home/ubuntu/hw3_logs"
+
+    # EKF noise. Q (odometry), per motion, as std devs:
+    #   sigma_ds     = min_sigma_s + k_s * |ds|
+    #   sigma_dtheta = min_sigma_theta + k_theta * |dtheta| + k_s_theta * |ds|
+    # R (tag sightings): sigma_range = sigma_r0 + k_r * range, sigma_bearing.
+    # Too small Q -> filter ignores tags and the map smears.
+    # Too small R -> pose jumps around. Tune offline with replay_slam.py.
+    k_s: 0.05
+    k_theta: 0.10
+    k_s_theta: 0.05
+    min_sigma_s: 0.005
+    min_sigma_theta: 0.005
+    sigma_r0: 0.02
+    k_r: 0.03
+    sigma_b_deg: 2.0
+    gate: 9.21                # Mahalanobis gate (chi^2, 2 dof, 99%)
