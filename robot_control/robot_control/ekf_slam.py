@@ -212,25 +212,63 @@ def detection_to_range_bearing(fx, ly):
     return math.hypot(fx, ly), math.atan2(ly, fx)
 
 
-def square_path(n, loops=1):
-    """Waypoints (x, y, theta) for an n x n square, counter-clockwise from (0, 0, 0)."""
-    corners = [(n, 0.0, math.pi / 2), (n, n, math.pi), (0.0, n, -math.pi / 2),
-               (0.0, 0.0, 0.0)]
-    return [(0.0, 0.0, 0.0)] + corners * loops
+def sighting_position(pose, r, b):
+    """Where one sighting (r, b) puts the tag, given the robot pose (x, y, theta)."""
+    x, y, th = pose
+    return x + r * math.cos(th + b), y + r * math.sin(th + b)
 
 
-def octagon_path(m, loops=1):
+def _corners(name, size):
     """
-    Waypoints for a regular octagon with side m, counter-clockwise from
-    (0, 0, 0): drive m, turn left 45 deg, repeat 8 times.
+    Corners (x, y, heading on arrival) of one counter-clockwise loop that
+    starts and ends at (0, 0, 0): drive one side, turn left, repeat.
     """
-    pts = [(0.0, 0.0, 0.0)]
+    if name == 'square':
+        sides = 4
+    elif name == 'octagon':
+        sides = 8
+    else:
+        raise ValueError(f'Unknown path "{name}" (use square / octagon)')
     x = y = 0.0
-    one_loop = []
-    for k in range(8):
-        h = k * math.pi / 4
-        x += m * math.cos(h)
-        y += m * math.sin(h)
-        one_loop.append((round(x, 6), round(y, 6), wrap((k + 1) * math.pi / 4)))
-    one_loop[-1] = (0.0, 0.0, 0.0)       # close the loop exactly
-    return pts + one_loop * loops
+    out = []
+    for k in range(sides):
+        h = k * 2 * math.pi / sides
+        x += size * math.cos(h)
+        y += size * math.sin(h)
+        out.append((round(x, 6), round(y, 6), wrap((k + 1) * 2 * math.pi / sides)))
+    out[-1] = (0.0, 0.0, 0.0)            # close the loop exactly
+    return out
+
+
+def path_parts(name, size, centered=True):
+    """
+    (entry, one_loop) waypoint lists for 'square' (n x n) or 'octagon' (side m).
+
+    centered=False: the start pose is a corner of the path; the robot needs
+        room AHEAD and to its LEFT (n for the square, 2.41 * m for the octagon).
+    centered=True:  the path is centered on the start pose, so it only needs
+        about n/2 (square) or 1.31 * m (octagon corners) of room in every
+        direction. The robot first drives to one corner (entry), then goes around.
+    """
+    corners = _corners(name, size)
+    if not centered:
+        return [], corners
+    cx = sum(c[0] for c in corners) / len(corners)
+    cy = sum(c[1] for c in corners) / len(corners)
+    shifted = [(round(x - cx, 6), round(y - cy, 6), th) for x, y, th in corners]
+    return [shifted[0]], shifted[1:] + [shifted[0]]
+
+
+def square_path(n, loops=1, centered=True):
+    """Waypoints (x, y, theta) for an n x n square, counter-clockwise, from (0, 0, 0)."""
+    entry, loop = path_parts('square', n, centered)
+    return [(0.0, 0.0, 0.0)] + entry + loop * loops
+
+
+def octagon_path(m, loops=1, centered=True):
+    """
+    Waypoints for a regular octagon with side m (drive m, turn left 45 deg,
+    8 times), counter-clockwise, from (0, 0, 0).
+    """
+    entry, loop = path_parts('octagon', m, centered)
+    return [(0.0, 0.0, 0.0)] + entry + loop * loops

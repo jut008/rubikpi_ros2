@@ -27,6 +27,11 @@ most of the error came from measuring the start pose, not the map shape.
 Just the ground-truth sketch for part 1 (no run needed):
        python3 analyze_map.py --gt ground_truth.csv --start 3 2 90 --units ft \
            --room 10 --sketch
+
+Just the robot's own map (no ground truth needed), in the start-pose frame:
+       python3 analyze_map.py LOG_DIR
+   Writes slam_map.png: estimated tags with 2-sigma ellipses, every single
+   sighting (from observations.csv) and the estimated robot path.
 """
 import argparse
 import csv
@@ -108,12 +113,57 @@ def draw_base(ax, gt, start, room):
     ax.set_ylabel('y (m)')
 
 
+def plot_slam_map(log_dir, out, plt):
+    """The robot's own map in its start frame: no ground truth needed."""
+    est = load_map(os.path.join(log_dir, 'map_final.csv'))
+    os.makedirs(out, exist_ok=True)
+    print(f'EKF found {len(est)} landmarks (map frame = start pose, meters)')
+    print(' tag       x        y    2-sigma x / y (cm)')
+    for tid, (p, S) in sorted(est.items()):
+        print(f'{tid:4d}  {p[0]:+7.3f}  {p[1]:+7.3f}     {200 * math.sqrt(max(S[0, 0], 0)):5.1f} / '
+              f'{200 * math.sqrt(max(S[1, 1], 0)):5.1f}')
+
+    fig, ax = plt.subplots(figsize=(7, 7))
+    colors = plt.rcParams['axes.prop_cycle'].by_key()['color']
+    col = {tid: colors[i % len(colors)] for i, tid in enumerate(sorted(est))}
+    obs_path = os.path.join(log_dir, 'observations.csv')
+    if os.path.exists(obs_path):
+        for r in read_csv(obs_path):
+            tid = int(r['id'])
+            ax.plot(float(r['seen_x']), float(r['seen_y']), '.', ms=4, alpha=0.35,
+                    color=col.get(tid, 'gray'))
+        ax.plot([], [], '.', color='gray', label='single sightings')
+    traj_path = os.path.join(log_dir, 'trajectory.csv')
+    if os.path.exists(traj_path):
+        tr = np.array([[float(r['x']), float(r['y'])] for r in read_csv(traj_path)])
+        ax.plot(tr[:, 0], tr[:, 1], '-', color='tab:blue', lw=1, alpha=0.7,
+                label='estimated robot path')
+    I = np.eye(2)
+    for tid, (p, S) in est.items():
+        ax.plot(p[0], p[1], 'x', color=col[tid], ms=9, mew=2)
+        ellipse(ax, p, S, I, col[tid])
+        ax.annotate(str(tid), p, textcoords='offset points', xytext=(6, 6), fontsize=9,
+                    color=col[tid])
+    ax.plot([], [], 'x', color='k', ms=8, mew=2, label='EKF tags (2-sigma)')
+    ax.arrow(0, 0, 0.25, 0, width=0.02, color='k', length_includes_head=True)
+    ax.plot(0, 0, 'ko', ms=4, label='start pose (0, 0, 0)')
+    ax.set_aspect('equal')
+    ax.grid(alpha=0.3)
+    ax.set_xlabel('x (m), start heading')
+    ax.set_ylabel('y (m), left of start')
+    ax.set_title(f'EKF SLAM map: {len(est)} landmarks')
+    ax.legend(loc='upper right', fontsize=8)
+    path = os.path.join(out, 'slam_map.png')
+    fig.savefig(path, dpi=150, bbox_inches='tight')
+    print(f'Wrote {path}')
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument('log_dir', nargs='?')
-    ap.add_argument('--gt', required=True, help='measured tags CSV: id,x,y')
-    ap.add_argument('--start', nargs=3, type=float, required=True,
+    ap.add_argument('--gt', help='measured tags CSV: id,x,y (omit to plot only the EKF map)')
+    ap.add_argument('--start', nargs=3, type=float,
                     metavar=('X0', 'Y0', 'THETA0_DEG'), help='measured start pose')
     ap.add_argument('--units', default='m', choices=UNITS, help='units of --gt and --start')
     ap.add_argument('--room', type=float, default=0.0, help='side of the square area')
@@ -124,6 +174,14 @@ def main():
     import matplotlib
     matplotlib.use('Agg')
     import matplotlib.pyplot as plt
+
+    if not a.gt:
+        if not a.log_dir:
+            ap.error('give LOG_DIR (to plot the EKF map) and/or --gt')
+        plot_slam_map(a.log_dir, a.out or a.log_dir, plt)
+        return
+    if a.start is None:
+        ap.error('--start X0 Y0 THETA0_DEG is needed with --gt')
 
     k = UNITS[a.units]
     gt = load_gt(a.gt, k)

@@ -7,7 +7,8 @@ settings without driving the robot again. No ROS needed.
     python3 replay_slam.py LOG_DIR --k_theta 0.15 --sigma_b_deg 3 --out replay_a
 
 Uses the run's params.json, with any --name value overrides. Writes
-map_final.csv, map_loops.csv and trajectory.csv (same columns as the robot)
+map_final.csv, map_loops.csv, trajectory.csv and observations.csv (same
+columns as the robot)
 into LOG_DIR/<out>/, so analyze_map.py works on it the same way.
 """
 import argparse
@@ -19,7 +20,7 @@ import sys
 import numpy as np
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'))
-from robot_control.ekf_slam import EKF_PARAMS, make_ekf  # noqa: E402
+from robot_control.ekf_slam import EKF_PARAMS, make_ekf, sighting_position  # noqa: E402
 
 
 def replay(log_dir, overrides=None):
@@ -27,15 +28,22 @@ def replay(log_dir, overrides=None):
         p = json.load(f)
     p.update(overrides or {})
     ekf = make_ekf(p)
-    traj, loop_maps = [], []
+    traj, loop_maps, sightings = [], [], []
     counts = {'new': 0, 'updated': 0, 'rejected': 0}
     with open(os.path.join(log_dir, 'events.csv')) as f:
         for row in csv.DictReader(f):
             if row['kind'] == 'predict':
                 ekf.predict(float(row['a']), float(row['b']))
             elif row['kind'] == 'obs':
-                result, _ = ekf.observe(int(row['a']), float(row['b']), float(row['c']))
+                tid, r, b = int(row['a']), float(row['b']), float(row['c'])
+                pose = ekf.pose
+                seen = sighting_position(pose, r, b)
+                result, m = ekf.observe(tid, r, b)
                 counts[result] += 1
+                est = ekf.landmarks()[tid]
+                sightings.append([row['t'], '', tid, r, np.degrees(b), pose[0], pose[1],
+                                  np.degrees(pose[2]), *seen, result,
+                                  '' if m is None else m, est[0], est[1]])
             elif row['kind'] == 'loop_end':
                 for tid, (x, y, S) in ekf.landmarks().items():
                     loop_maps.append([row['a'], row['b'], tid, x, y,
@@ -43,7 +51,7 @@ def replay(log_dir, overrides=None):
             x, y, th = ekf.pose
             sd = np.sqrt(np.maximum(np.diag(ekf.Sigma)[:3], 0.0))
             traj.append([row['t'], x, y, th, *sd, ekf.n_landmarks, ''])
-    return ekf, traj, loop_maps, counts, p
+    return ekf, traj, loop_maps, sightings, counts, p
 
 
 def main():
@@ -55,7 +63,7 @@ def main():
         ap.add_argument(f'--{n}', type=float)
     a = ap.parse_args()
     over = {n: getattr(a, n) for n in EKF_PARAMS if getattr(a, n) is not None}
-    ekf, traj, loop_maps, counts, p = replay(a.log_dir, over)
+    ekf, traj, loop_maps, sightings, counts, p = replay(a.log_dir, over)
 
     out = os.path.join(a.log_dir, a.out)
     os.makedirs(out, exist_ok=True)
@@ -72,6 +80,9 @@ def main():
     write('map_final.csv', ['id', 'x', 'y', 'sxx', 'sxy', 'syy'],
           [[tid, x, y, S[0, 0], S[0, 1], S[1, 1]]
            for tid, (x, y, S) in ekf.landmarks().items()])
+    write('observations.csv', ['t', 'waypoint', 'id', 'range_m', 'bearing_deg',
+                               'robot_x', 'robot_y', 'robot_theta_deg', 'seen_x', 'seen_y',
+                               'result', 'mahalanobis', 'est_x', 'est_y'], sightings)
     with open(os.path.join(out, 'params.json'), 'w') as f:
         json.dump(p, f, indent=2)
     settings = {n: p[n] for n in EKF_PARAMS}

@@ -14,6 +14,10 @@ Same stop-and-go loop as HW2, but there is NO tag map. The robot starts at
                 and tag sighting (so replay_slam.py can re-run the filter
                 offline), and a map snapshot after every loop.
 
+By default the path is centered on the start pose: the robot drives out to
+one corner, goes around, and comes back to where it started. At the end it
+prints the map and writes map_summary.txt + observations.csv for the report.
+
 Needs (in other terminals):
     ros2 launch robot_vision_camera robot_vision_camera.launch.py
     ros2 run robot_control motor_control
@@ -37,8 +41,8 @@ from rclpy.qos import HistoryPolicy, QoSProfile, ReliabilityPolicy
 from sensor_msgs.msg import CameraInfo, CompressedImage, Imu
 from std_msgs.msg import Float32MultiArray
 
-from robot_control.ekf_slam import (detection_to_range_bearing, make_ekf, octagon_path,
-                                    square_path, wrap)
+from robot_control.ekf_slam import (detection_to_range_bearing, make_ekf, path_parts,
+                                    sighting_position, wrap)
 from robot_control.tag_localization import TagDetector, tag_in_robot_frame
 
 
@@ -55,6 +59,8 @@ class Hw3Slam(Node):
         P('square_size', 1.0)            # n, meters
         P('octagon_side', 0.6)           # m, meters
         P('loops', 1)                    # times around each path
+        P('center_path', True)           # path centered on the start pose (else start = corner)
+        P('return_to_start', True)       # drive back to (0, 0, 0) at the end
         # --- tags / camera ---
         P('tag_size', 0.163)
         P('tag_family', '36h11')
@@ -107,18 +113,19 @@ class Hw3Slam(Node):
         self.detector = TagDetector(self.p['tag_size'], self.p['tag_family'])
         self.ekf = make_ekf(self.p)
 
-        # waypoints, each tagged with (path name, loop number, last-of-loop?)
+        # waypoints, each tagged with (path name, loop number, last-of-loop?).
+        # loop 0 = driving from the start to the path (entry) or back (return).
         self.plan = []
         for name in [s.strip() for s in self.p['paths'].split(',') if s.strip()]:
-            if name == 'square':
-                one = square_path(self.p['square_size'], 1)[1:]
-            elif name == 'octagon':
-                one = octagon_path(self.p['octagon_side'], 1)[1:]
-            else:
-                raise ValueError(f'Unknown path "{name}" (use square / octagon)')
+            size = self.p['square_size' if name == 'square' else 'octagon_side']
+            entry, one = path_parts(name, size, self.p['center_path'])
+            for wp in entry:
+                self.plan.append((wp, name, 0, False))
             for loop in range(1, self.p['loops'] + 1):
                 for k, wp in enumerate(one):
                     self.plan.append((wp, name, loop, k == len(one) - 1))
+        if self.p['return_to_start'] and self.plan and self.plan[-1][0][:2] != (0.0, 0.0):
+            self.plan.append(((0.0, 0.0, 0.0), 'return', 0, False))
 
         # --- ROS I/O ---
         self.motor_pub = self.create_publisher(Float32MultiArray, 'motor_commands', 10)
@@ -143,6 +150,7 @@ class Hw3Slam(Node):
         self.traj = []        # t, x, y, theta, sd_x, sd_y, sd_theta, n_landmarks, wp
         self.loop_maps = []   # path, loop, id, x, y, sxx, sxy, syy
         self.wp_results = []
+        self.sightings = []   # one row per tag detection (see save_logs)
         self.get_logger().info(f'{len(self.plan)} waypoints: '
                                f'{[tuple(round(v, 2) for v in w[0]) for w in self.plan]}')
 
@@ -258,9 +266,15 @@ class Hw3Slam(Node):
             rvec, tvec, _ = d['candidates'][0]
             fx, ly, _ = tag_in_robot_frame(rvec, tvec, self.cam_offset)
             r, b = detection_to_range_bearing(fx, ly)
+            pose = self.ekf.pose
+            seen_x, seen_y = sighting_position(pose, r, b)
             result, m = self.ekf.observe(d['id'], r, b)
             self.events.append([self.t(), 'obs', d['id'], r, b, result,
                                 '' if m is None else m])
+            est_x, est_y, _ = self.ekf.landmarks()[d['id']]
+            self.sightings.append([self.t(), self.wp_index, d['id'], r, math.degrees(b),
+                                   *pose[:2], math.degrees(pose[2]), seen_x, seen_y,
+                                   result, '' if m is None else m, est_x, est_y])
             n_upd += result == 'updated'
             msgs.append(f'{d["id"]}:{result}' + ('' if m is None else f'(M={m:.1f})'))
         x, y, th = self.ekf.pose
@@ -289,6 +303,29 @@ class Hw3Slam(Node):
     def snapshot_map(self, path, loop):
         for tid, (x, y, S) in self.ekf.landmarks().items():
             self.loop_maps.append([path, loop, tid, x, y, S[0, 0], S[0, 1], S[1, 1]])
+        self.log_map(f'Map after {path} loop {loop}')
+
+    def map_table(self):
+        """Readable lines: every landmark's position, uncertainty and sighting counts."""
+        counts = {}
+        for row in self.sightings:
+            c = counts.setdefault(row[2], {'new': 0, 'updated': 0, 'rejected': 0})
+            c[row[10]] += 1                  # result column
+        lines = [' tag      x (m)    y (m)   2-sigma x/y (cm)   seen  used  rejected']
+        for tid, (x, y, S) in sorted(self.ekf.landmarks().items()):
+            c = counts.get(tid, {'new': 0, 'updated': 0, 'rejected': 0})
+            lines.append(f'{tid:4d}   {x:+8.3f} {y:+8.3f}   '
+                         f'{200 * math.sqrt(max(S[0, 0], 0)):6.1f} / '
+                         f'{200 * math.sqrt(max(S[1, 1], 0)):5.1f}     '
+                         f'{sum(c.values()):4d}  {c["new"] + c["updated"]:4d}  {c["rejected"]:6d}')
+        return lines
+
+    def log_map(self, title):
+        x, y, th = self.ekf.pose
+        self.get_logger().info(f'{title}: {self.ekf.n_landmarks} landmarks, robot at '
+                               f'({x:+.3f}, {y:+.3f}, {math.degrees(th):+.1f} deg)')
+        for line in self.map_table():
+            self.get_logger().info('  ' + line)
 
     # ---------------- control (same logic as HW2) ----------------
     def step_toward(self, wp):
@@ -342,7 +379,9 @@ class Hw3Slam(Node):
         self.look()
         for i, (wp, path, loop, last) in enumerate(self.plan, start=1):
             self.wp_index = i
-            self.get_logger().info(f'=== {path} loop {loop}, waypoint {i}: '
+            stage = (f'{path} loop {loop}' if loop else
+                     'back to start' if path == 'return' else f'to the {path}')
+            self.get_logger().info(f'=== {stage}, waypoint {i}: '
                                    f'({wp[0]:.2f}, {wp[1]:.2f}, {math.degrees(wp[2]):.0f} deg) ===')
             for _ in range(self.p['max_steps_per_waypoint']):
                 if not rclpy.ok():
@@ -387,8 +426,37 @@ class Hw3Slam(Node):
                for tid, (x, y, S) in self.ekf.landmarks().items()])
         write('waypoints.csv', ['waypoint', 'path', 'loop', 'goal_x', 'goal_y', 'goal_theta',
                                 'est_x', 'est_y', 'est_theta', 't'], self.wp_results)
+        # every detection: robot pose just before it, where that one sighting
+        # puts the tag, and the EKF estimate of the tag right after it
+        write('observations.csv', ['t', 'waypoint', 'id', 'range_m', 'bearing_deg',
+                                   'robot_x', 'robot_y', 'robot_theta_deg', 'seen_x', 'seen_y',
+                                   'result', 'mahalanobis', 'est_x', 'est_y'], self.sightings)
         with open(os.path.join(out, 'params.json'), 'w') as f:
             json.dump(self.p, f, indent=2)
+
+        x, y, th = self.ekf.pose
+        sd = np.sqrt(np.maximum(np.diag(self.ekf.Sigma)[:3], 0.0))
+        summary = [
+            f'HW3 EKF SLAM run {os.path.basename(out)}',
+            f'paths: {self.p["paths"]}  square_size {self.p["square_size"]} m  '
+            f'octagon_side {self.p["octagon_side"]} m  loops {self.p["loops"]}  '
+            f'centered {self.p["center_path"]}',
+            f'waypoints reached: {len(self.wp_results)} of {len(self.plan)}',
+            f'driven {self.dist_traveled:.2f} m, turned {math.degrees(self.angle_turned):.0f} deg, '
+            f'{self.t():.0f} s',
+            '',
+            'Map frame = robot start pose: origin at the start position, +x = starting',
+            'heading, +y = 90 deg to its left. Positions in meters.',
+            '',
+            f'Landmarks found: {self.ekf.n_landmarks}',
+            *self.map_table(),
+            '',
+            f'Final robot pose estimate: ({x:+.3f}, {y:+.3f}, {math.degrees(th):+.1f} deg)  '
+            f'1-sigma ({sd[0] * 100:.1f} cm, {sd[1] * 100:.1f} cm, {math.degrees(sd[2]):.1f} deg)',
+        ]
+        with open(os.path.join(out, 'map_summary.txt'), 'w') as f:
+            f.write('\n'.join(summary) + '\n')
+        self.log_map('Final map')
         self.get_logger().info(f'Saved logs to {out}')
 
 

@@ -3,14 +3,20 @@
 # position, +x = starting heading, +y = 90 deg to its left.
 hw3_slam:
   ros__parameters:
-    # Path. 'square', 'octagon', or 'square,octagon' (one run, same map).
-    # Both paths start at (0, 0) and go counter-clockwise (left turns), so
-    # the robot needs room AHEAD and to its LEFT. Square = n x n; the
-    # octagon with side m is m * 2.41 wide.
+    # Path. Do one run with 'square' and one with 'octagon' to get two maps
+    # to compare ('square,octagon' builds ONE map from both).
+    # center_path: true = the path is centered on the start pose (robot
+    # drives out to a corner, goes around counter-clockwise, then comes back
+    # if return_to_start). Room needed in every direction from the start:
+    # about n/2 for the square, 1.31 * m for the octagon's corners.
+    # center_path: false = the start pose is a corner; needs room AHEAD and to
+    # the LEFT (n for the square, 2.41 * m for the octagon).
     paths: "square"
-    square_size: 1.0          # n (m)
-    octagon_side: 0.6         # m (m) -> about 1.45 m across
+    square_size: 1.0          # n (m) -> corners 0.5 m from the start in x and y
+    octagon_side: 0.6         # m (m) -> corners 0.78 m from the start
     loops: 1                  # times around each path (try 1, then 2 or 3)
+    center_path: true
+    return_to_start: true
 
     # Tags / camera (same as HW2)
     tag_size: 0.163           # edge of the BLACK square in meters (6.75 in)

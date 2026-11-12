@@ -1,9 +1,10 @@
 """
 Simulated check of ekf_slam.py (no robot needed):
     python3 -m pytest robot_control/test/test_ekf_slam.py -q
-A robot with biased, noisy odometry drives the square and octagon paths in
-a 3 m room with 8 tags. The EKF map should beat dead reckoning and land
-within a few cm of the true tags.
+A robot with biased, noisy odometry drives the square and octagon paths
+(centered on its start pose) in an 8 ft x 8 ft area with two tags on each
+side, from the center and from an off-center, rotated start. The EKF map
+should beat dead reckoning and land within a few cm of the true tags.
 """
 import math
 import os
@@ -14,14 +15,26 @@ import numpy as np
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 from robot_control.ekf_slam import EKFSlam, octagon_path, square_path, wrap  # noqa: E402
 
-# true tags in the robot's start frame (robot starts at (0, 0) facing +x)
-TAGS = {0: (2.0, -0.5), 1: (2.0, 1.5), 2: (1.0, 2.3), 3: (-0.2, 2.3),
-        4: (-0.9, 1.5), 5: (-0.9, -0.3), 6: (0.0, -0.9), 7: (1.2, -0.9)}
+ROOM = 8 * 0.3048            # 8 ft square, world frame origin at one corner
+A, B = ROOM / 3, 2 * ROOM / 3
+TAGS_WORLD = {0: (A, 0.0), 1: (B, 0.0), 2: (ROOM, A), 3: (ROOM, B),
+              4: (B, ROOM), 5: (A, ROOM), 6: (0.0, B), 7: (0.0, A)}
+STARTS = {'center': (ROOM / 2, ROOM / 2, 0.0),
+          'off-center': (ROOM / 2 - 0.2, ROOM / 2 + 0.15, math.radians(120))}
 FOV = math.radians(35)       # half field of view
 MAX_RANGE = 3.0
 
 
-def simulate(waypoints, seed=0, step=0.25):
+def tags_in_start_frame(start):
+    """The robot doesn't know its start pose: its map frame IS the start pose."""
+    x0, y0, th0 = start
+    c, s = math.cos(th0), math.sin(th0)
+    return {t: (c * (x - x0) + s * (y - y0), -s * (x - x0) + c * (y - y0))
+            for t, (x, y) in TAGS_WORLD.items()}
+
+
+def simulate(waypoints, start, seed=0, step=0.25):
+    TAGS = tags_in_start_frame(start)
     rng = np.random.default_rng(seed)
     true = np.array([0.0, 0.0, 0.0])
     ekf = EKFSlam()
@@ -72,18 +85,35 @@ def simulate(waypoints, seed=0, step=0.25):
     return ekf, err, pose_err, odo_err
 
 
+def test_centered_paths_stay_in_the_room():
+    for start in STARTS.values():
+        x0, y0, th0 = start
+        for wps in [square_path(1.0, loops=1), octagon_path(0.6, loops=1)]:
+            for x, y, _ in wps:
+                wx = x0 + x * math.cos(th0) - y * math.sin(th0)
+                wy = y0 + x * math.sin(th0) + y * math.cos(th0)
+                # robot center stays 0.2 m from the walls (robot half-length + margin)
+                assert 0.2 < wx < ROOM - 0.2 and 0.2 < wy < ROOM - 0.2
+
+
 def test_square_and_octagon():
-    for name, wps in [('square', square_path(1.0, loops=2)),
-                      ('octagon', octagon_path(0.6, loops=2))]:
-        ekf, err, pose_err, odo_err = simulate(wps)
-        print(f'{name}: {ekf.n_landmarks} tags, mean map error {err * 100:.1f} cm, '
-              f'final pose error {pose_err * 100:.1f} cm (odometry only '
-              f'{odo_err * 100:.1f} cm)')
-        assert ekf.n_landmarks >= 6
-        assert err < 0.15
-        assert pose_err < odo_err
-        assert np.all(np.linalg.eigvalsh(ekf.Sigma) > -1e-9)   # still a covariance
+    for where, start in STARTS.items():
+        for name, wps in [('square', square_path(1.0, loops=2)),
+                          ('octagon', octagon_path(0.6, loops=2))]:
+            ekf, err, pose_err, odo_err = simulate(wps, start)
+            print(f'{where} {name}: {ekf.n_landmarks} tags, mean map error '
+                  f'{err * 100:.1f} cm, final pose error {pose_err * 100:.1f} cm '
+                  f'(odometry only {odo_err * 100:.1f} cm)')
+            check(ekf, err, pose_err, odo_err)
+
+
+def check(ekf, err, pose_err, odo_err):
+    assert ekf.n_landmarks >= 6
+    assert err < 0.15
+    assert pose_err < odo_err
+    assert np.all(np.linalg.eigvalsh(ekf.Sigma) > -1e-9)   # still a covariance
 
 
 if __name__ == '__main__':
+    test_centered_paths_stay_in_the_room()
     test_square_and_octagon()
