@@ -9,6 +9,8 @@ Then:
     python3 calibrate_motion.py                 # turn test + forward test
     python3 calibrate_motion.py --skip-forward  # turns only
     python3 calibrate_motion.py --manual        # no IMU; you judge the angles
+    python3 calibrate_motion.py --straight --drive-left 0.32 --drive-right 0.40
+                                                # hw3: fix the left curve
 
 It measures:
   1. Turns: for increasing turn commands, turns left for --turn-time
@@ -115,6 +117,56 @@ def manual(node, args):
         node.run_for(0.0, 0.0, 0.1)
 
 
+def straight(node, args):
+    """
+    Straight-drive test for hw3 (no IMU needed). Drives drive_time seconds
+    with the given wheel commands; you measure how far it went and how far it
+    ended up to the side. Repeats with new wheel values until it's straight,
+    then prints the lines for hw3_params.yaml.
+
+    Curve: a constant curve kappa (rad/m) over a distance L ends up
+    kappa * L^2 / 2 to the side, so kappa = 2 * side / L^2.
+    Suggested fix: the in-place turn rate tells how much heading one unit of
+    left/right difference gives (turn_rate = 2 * k * turn_cmd), so cancelling
+    kappa at speed v needs a difference of kappa * v * 2 * turn_cmd / turn_rate.
+    """
+    left, right = args.drive_left, args.drive_right
+    speed = curve = None
+    try:
+        print('\nStraight-drive test. Give it ~1.5 m of clear floor ahead.')
+        print('Put tape at the robot\'s center and a line along its heading so you can')
+        print('measure where it ends: distance FORWARD along the line, and SIDEWAYS from it.')
+        while True:
+            ask(f'\nPress Enter to drive {args.drive_time:.1f} s at L={left:.3f}, R={right:.3f}.')
+            node.run_for(left, right, args.drive_time)
+            dist = float(ask('  Distance forward along the line (m): '))
+            side = float(ask('  Sideways from the line (m, + = ended LEFT, - = RIGHT): '))
+            speed = dist / args.drive_time
+            curve = 2.0 * side / dist ** 2 if dist > 0 else 0.0         # rad/m
+            print(f'  speed {speed:.3f} m/s, curves {math.degrees(curve):+.1f} deg per meter '
+                  f'({"left" if curve > 0 else "right"})')
+            diff = curve * speed * 2.0 * args.turn_cmd / args.turn_rate
+            if abs(math.degrees(curve)) < 3:
+                print('  Straight enough.')
+                break
+            new_left, new_right = left + diff / 2, right - diff / 2
+            print(f'  To straighten, try L={new_left:.3f}, R={new_right:.3f}.')
+            a = ask('  Try that? [Y/n/q = keep these values and finish] ')
+            if a == 'q':
+                break
+            if a != 'n':
+                left, right = new_left, new_right
+        print('\nPaste into hw3_params.yaml (then rebuild):')
+        print(f'    drive_left: {left:.3f}')
+        print(f'    drive_right: {right:.3f}')
+        print(f'    drive_speed: {speed:.3f}')
+        print(f'    drive_curve_deg_per_m: {math.degrees(curve):.1f}')
+    except (KeyboardInterrupt, EOFError, ValueError):
+        pass
+    finally:
+        node.run_for(0.0, 0.0, 0.1)
+
+
 def main():
     p = argparse.ArgumentParser()
     p.add_argument('--cmds', default='0.15,0.2,0.25,0.3,0.35,0.4',
@@ -127,13 +179,22 @@ def main():
     p.add_argument('--manual', action='store_true',
                    help='no IMU: you measure the turn angles by eye')
     p.add_argument('--turn-cmd', type=float, default=0.30,
-                   help='turn strength for --manual')
+                   help='turn strength for --manual (and --straight\'s suggestion)')
+    p.add_argument('--turn-rate', type=float, default=2.051,
+                   help='rad/s at --turn-cmd, for --straight\'s suggestion')
+    p.add_argument('--straight', action='store_true',
+                   help='hw3: straight-drive test only (no IMU); finds the curve')
     args = p.parse_args()
 
     rclpy.init()
     node = Calib()
     threading.Thread(target=rclpy.spin, args=(node,), daemon=True).start()
     results = {}
+    if args.straight:
+        straight(node, args)
+        node.destroy_node()
+        rclpy.shutdown()
+        return
     if args.manual:
         manual(node, args)
         node.destroy_node()

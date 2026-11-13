@@ -1,0 +1,2 @@
+checkpoint,path,loop,t,robot_x,robot_y,robot_theta_deg,sd_x,sd_y,sd_theta_deg,n_landmarks,distance_m,rotation_deg
+final,,,4.43,0.1847733985103409,-0.15512564357033934,-39.592121697030535,0.013404988148078377,0.011797917563261113,2.0855060193216493,4,0.2475,45.0

@@ -1,0 +1,91 @@
+# Parameters for hw3_slam (EKF SLAM). There is NO tag map here: the robot
+# builds it. Map frame = the robot's start pose: origin at the start
+# position, +x = starting heading, +y = 90 deg to its left.
+hw3_slam:
+  ros__parameters:
+    # Path. Do one run with 'square' and one with 'octagon' to get two maps
+    # to compare ('square,octagon' builds ONE map from both).
+    # center_path: true = the path is centered on the start pose (robot
+    # drives STRAIGHT ahead to the middle of the side in front of it, turns
+    # left, goes around counter-clockwise, then comes back
+    # if return_to_start). Room needed in every direction from the start:
+    # about n/2 for the square, 1.31 * m for the octagon's corners.
+    # center_path: false = the start pose is a corner; needs room AHEAD and to
+    # the LEFT (n for the square, 2.41 * m for the octagon).
+    paths: "octagon"
+    square_size: 1.0          # n (m). Start 0.72 m from the right + back walls (8 ft area)
+    octagon_side: 0.5         # m (m) -> corners 0.78 m from the start
+    loops: 5                  # times around each path (try 1, then 2 or 3)
+    center_path: true
+    return_to_start: true
+
+    # Tags / camera (same as HW2)
+    tag_size: 0.157            # edge of the BLACK square in meters (6.75 in)
+    tag_family: "36h11"
+    max_tag_dist: 4.0         # ignore tags farther than this (m)
+    max_reproj_err: 5.0       # px
+    camera_offset_x: 0.10     # camera ahead of the robot center (m)
+    camera_offset_y: 0.0
+    image_is_rectified: false
+
+    # Motion, copied from HW2's calibration
+    drive_left: 0.32
+    drive_right: 0.40
+    drive_speed: 0.4 # 0.495 -> 0.43 -> 0.4
+    # "Straight" drives curve LEFT about 10-16 deg per meter (fit from the
+    # Nov 13 runs: tags drift sideways while driving). Without the IMU the
+    # odometry assumes this average curve. Re-fit if the wheels/battery change.
+    drive_curve_deg_per_m: 15.0 # 12 -> 26.0 -> 15.0
+    turn_cmd: 0.3
+    turn_rate: 2.051
+    turn_rate_left: 1.81 #1.963 -> 1.81
+    turn_rate_right: 1.88  # 2.138 -> 1.88
+    search_cmd: 0.3
+    search_step: 0.35
+    use_imu: false
+    imu_yaw_sign: 1.0
+
+    # Control loop. Shorter steps = more tag sightings = better map.
+    step_time: 0.25           # s of driving per step (~0.25 m)
+    settle_time: 0.4
+    pos_tol: 0.05
+    reach_radius: 0.12 # 0.08 for square, 0.12 for octogon
+    ang_tol: 0.2  # 0.10 -> 0.2
+    heading_tol: 0.25 # 0.12 for 5loop square, 0.25 for octagon, 
+    edge_bearing_deg: 25.0
+    edge_noise_scale: 3.0     # 1.0 = off
+    back_up_deg: 90.0
+    new_tag_max_bearing_deg: 30.0   # 0 = off
+    # Split turns bigger than this (degrees) into pieces, stopping to look for
+    # tags between them so a turn's error is corrected before it finishes.
+    # 0 = off (turn in one go). Try 45; much smaller pulses get unreliable.
+    # 45: corners are turned 45 + 45 with a look between, so a known tag seen
+    # mid-turn corrects a short timed turn (sim: halves the map error and keeps
+    # the robot farther from the walls; timed turns ran ~10% short on Nov 13).
+    max_turn_step_deg: 45.0 # 0.0 -> 45.0 after re-calibration
+    # Search = turning in place to look for tags when none was seen for
+    # max_blind_steps steps. OFF for SLAM: a few blind steps are normal, the
+    # robot keeps to the path on odometry and corrects at the next tag.
+    # Spinning to look added turn error and pulled the robot off the square.
+    # If on, it sweeps at most search_max_deg and turns back if nothing found.
+    search: false
+    search_max_deg: 90.0
+    max_blind_steps: 3
+    max_steps_per_waypoint: 40
+    log_dir: "/home/ubuntu/hw3_logs"
+
+    # EKF noise. Q (odometry), per motion, as std devs:
+    #   sigma_ds     = min_sigma_s + k_s * |ds|
+    #   sigma_dtheta = min_sigma_theta + k_theta * |dtheta| + k_s_theta * |ds|
+    # R (tag sightings): sigma_range = sigma_r0 + k_r * range, sigma_bearing.
+    # Too small Q -> filter ignores tags and the map smears.
+    # Too small R -> pose jumps around. Tune offline with replay_slam.py.
+    k_s: 0.05
+    k_theta: 0.25 # 0.1 -> 0.25 now
+    k_s_theta: 0.2            # was 0.05: too sure drives were straight -> rejected good tags
+    min_sigma_s: 0.005
+    min_sigma_theta: 0.05 # 0.005 -> 0.05
+    sigma_r0: 0.02
+    k_r: 0.03
+    sigma_b_deg: 2.0
+    gate: 9.21                # Mahalanobis gate (chi^2, 2 dof, 99%)

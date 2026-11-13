@@ -12,7 +12,8 @@ setup(
         ('share/' + package_name, ['package.xml']),
         ('share/' + package_name + '/launch', ['launch/robot_teleop_launch.py',
                                                'launch/hw2_launch.py']),
-        ('share/' + package_name + '/config', ['config/hw2_params.yaml']),
+        ('share/' + package_name + '/config', ['config/hw2_params.yaml',
+                                               'config/hw3_params.yaml']),
     ],
     install_requires=[
         'setuptools',
@@ -32,6 +33,7 @@ setup(
             'keyboard_control = robot_control.keyboard_control:main',
             'velocity_control = robot_control.velocity_control:main',
             'hw2_navigator = robot_control.hw2_navigator:main',
+            'hw3_slam = robot_control.hw3_slam:main',
         ],
     },
 )
