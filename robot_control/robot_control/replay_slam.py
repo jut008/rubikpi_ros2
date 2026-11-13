@@ -8,10 +8,12 @@ settings without driving the robot again. No ROS needed.
 
 Uses the run's params.json, with any --name value overrides. Writes
 map_final.csv, map_loops.csv, trajectory.csv and observations.csv (same
-columns as the robot)
-into LOG_DIR/<out>/, so analyze_map.py works on it the same way.
+columns as the robot) into LOG_DIR/<out>/, so analyze_map.py works on it
+the same way. Also writes a checkpoint after every loop and at the end
+(LOG_DIR/<out>/checkpoints/<name>/ + checkpoints.csv), as the robot does.
 """
 import argparse
+import copy
 import csv
 import json
 import os
@@ -21,6 +23,8 @@ import numpy as np
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'))
 from robot_control.ekf_slam import EKF_PARAMS, make_ekf, sighting_position  # noqa: E402
+from robot_control.slam_logs import (MAP_HEADER, OBS_HEADER, TRAJ_HEADER,  # noqa: E402
+                                     landmark_rows, write_checkpoint, write_csv)
 
 
 def replay(log_dir, overrides=None):
@@ -28,12 +32,17 @@ def replay(log_dir, overrides=None):
         p = json.load(f)
     p.update(overrides or {})
     ekf = make_ekf(p)
-    traj, loop_maps, sightings = [], [], []
+    traj, loop_maps, sightings, checkpoints = [], [], [], []
     counts = {'new': 0, 'updated': 0, 'rejected': 0}
+    dist = rot = 0.0
+    t = 0.0
     with open(os.path.join(log_dir, 'events.csv')) as f:
         for row in csv.DictReader(f):
+            t = float(row['t'])
             if row['kind'] == 'predict':
                 ekf.predict(float(row['a']), float(row['b']))
+                dist += abs(float(row['a']))
+                rot += abs(float(row['b']))
             elif row['kind'] == 'obs':
                 tid, r, b = int(row['a']), float(row['b']), float(row['c'])
                 pose = ekf.pose
@@ -51,7 +60,15 @@ def replay(log_dir, overrides=None):
             x, y, th = ekf.pose
             sd = np.sqrt(np.maximum(np.diag(ekf.Sigma)[:3], 0.0))
             traj.append([row['t'], x, y, th, *sd, ekf.n_landmarks, ''])
-    return ekf, traj, loop_maps, sightings, counts, p
+            if row['kind'] == 'loop_end':
+                # a frozen copy of the filter + how many log rows exist at this moment
+                checkpoints.append({'name': f"{row['a']}_loop{row['b']}", 'path': row['a'],
+                                    'loop': row['b'], 't': t, 'ekf': copy.deepcopy(ekf),
+                                    'n_traj': len(traj), 'n_obs': len(sightings),
+                                    'dist': dist, 'rot': rot})
+    checkpoints.append({'name': 'final', 'path': '', 'loop': '', 't': t, 'ekf': ekf,
+                        'n_traj': len(traj), 'n_obs': len(sightings), 'dist': dist, 'rot': rot})
+    return ekf, traj, loop_maps, sightings, counts, p, checkpoints
 
 
 def main():
@@ -63,26 +80,24 @@ def main():
         ap.add_argument(f'--{n}', type=float)
     a = ap.parse_args()
     over = {n: getattr(a, n) for n in EKF_PARAMS if getattr(a, n) is not None}
-    ekf, traj, loop_maps, sightings, counts, p = replay(a.log_dir, over)
+    ekf, traj, loop_maps, sightings, counts, p, checkpoints = replay(a.log_dir, over)
 
     out = os.path.join(a.log_dir, a.out)
     os.makedirs(out, exist_ok=True)
 
     def write(name, header, rows):
-        with open(os.path.join(out, name), 'w', newline='') as f:
-            w = csv.writer(f)
-            w.writerow(header)
-            w.writerows(rows)
+        write_csv(out, name, header, rows)
 
-    write('trajectory.csv', ['t', 'x', 'y', 'theta', 'sd_x', 'sd_y', 'sd_theta',
-                             'n_landmarks', 'waypoint'], traj)
+    write('trajectory.csv', TRAJ_HEADER, traj)
     write('map_loops.csv', ['path', 'loop', 'id', 'x', 'y', 'sxx', 'sxy', 'syy'], loop_maps)
-    write('map_final.csv', ['id', 'x', 'y', 'sxx', 'sxy', 'syy'],
-          [[tid, x, y, S[0, 0], S[0, 1], S[1, 1]]
-           for tid, (x, y, S) in ekf.landmarks().items()])
-    write('observations.csv', ['t', 'waypoint', 'id', 'range_m', 'bearing_deg',
-                               'robot_x', 'robot_y', 'robot_theta_deg', 'seen_x', 'seen_y',
-                               'result', 'mahalanobis', 'est_x', 'est_y'], sightings)
+    write('map_final.csv', MAP_HEADER, landmark_rows(ekf))
+    write('observations.csv', OBS_HEADER, sightings)
+    index = os.path.join(out, 'checkpoints.csv')
+    if os.path.exists(index):
+        os.remove(index)                  # a fresh index for this replay
+    for c in checkpoints:
+        write_checkpoint(out, c['name'], c['ekf'], traj[:c['n_traj']], sightings[:c['n_obs']],
+                         c['t'], c['path'], c['loop'], c['dist'], c['rot'])
     with open(os.path.join(out, 'params.json'), 'w') as f:
         json.dump(p, f, indent=2)
     settings = {n: p[n] for n in EKF_PARAMS}
@@ -93,6 +108,7 @@ def main():
     for tid, (x, y, S) in sorted(ekf.landmarks().items()):
         print(f'  tag {tid:3d}: ({x:+.3f}, {y:+.3f})  2-sigma '
               f'{2 * np.sqrt(S[0, 0]) * 100:.1f} x {2 * np.sqrt(S[1, 1]) * 100:.1f} cm')
+    print(f'Checkpoints: {", ".join(c["name"] for c in checkpoints)}')
     print(f'Wrote {out}/')
 
 

@@ -30,8 +30,9 @@ Just the ground-truth sketch for part 1 (no run needed):
 
 Just the robot's own map (no ground truth needed), in the start-pose frame:
        python3 analyze_map.py LOG_DIR
-   Writes slam_map.png: estimated tags with 2-sigma ellipses, every single
-   sighting (from observations.csv) and the estimated robot path.
+   Writes slam_map.png (meters) and slam_map_ft.png (feet): estimated tags
+   with 2-sigma ellipses, every single sighting (from observations.csv) and
+   the estimated robot path.
 """
 import argparse
 import csv
@@ -114,48 +115,60 @@ def draw_base(ax, gt, start, room):
 
 
 def plot_slam_map(log_dir, out, plt):
-    """The robot's own map in its start frame: no ground truth needed."""
+    """
+    The robot's own map in its start frame: no ground truth needed.
+    Draws it twice: slam_map.png in meters, then slam_map_ft.png in feet.
+    """
     est = load_map(os.path.join(log_dir, 'map_final.csv'))
     os.makedirs(out, exist_ok=True)
-    print(f'EKF found {len(est)} landmarks (map frame = start pose, meters)')
-    print(' tag       x        y    2-sigma x / y (cm)')
-    for tid, (p, S) in sorted(est.items()):
-        print(f'{tid:4d}  {p[0]:+7.3f}  {p[1]:+7.3f}     {200 * math.sqrt(max(S[0, 0], 0)):5.1f} / '
-              f'{200 * math.sqrt(max(S[1, 1], 0)):5.1f}')
-
-    fig, ax = plt.subplots(figsize=(7, 7))
-    colors = plt.rcParams['axes.prop_cycle'].by_key()['color']
-    col = {tid: colors[i % len(colors)] for i, tid in enumerate(sorted(est))}
     obs_path = os.path.join(log_dir, 'observations.csv')
-    if os.path.exists(obs_path):
-        for r in read_csv(obs_path):
-            tid = int(r['id'])
-            ax.plot(float(r['seen_x']), float(r['seen_y']), '.', ms=4, alpha=0.35,
-                    color=col.get(tid, 'gray'))
-        ax.plot([], [], '.', color='gray', label='single sightings')
+    obs = read_csv(obs_path) if os.path.exists(obs_path) else []
     traj_path = os.path.join(log_dir, 'trajectory.csv')
-    if os.path.exists(traj_path):
-        tr = np.array([[float(r['x']), float(r['y'])] for r in read_csv(traj_path)])
-        ax.plot(tr[:, 0], tr[:, 1], '-', color='tab:blue', lw=1, alpha=0.7,
-                label='estimated robot path')
-    I = np.eye(2)
-    for tid, (p, S) in est.items():
-        ax.plot(p[0], p[1], 'x', color=col[tid], ms=9, mew=2)
-        ellipse(ax, p, S, I, col[tid])
-        ax.annotate(str(tid), p, textcoords='offset points', xytext=(6, 6), fontsize=9,
-                    color=col[tid])
-    ax.plot([], [], 'x', color='k', ms=8, mew=2, label='EKF tags (2-sigma)')
-    ax.arrow(0, 0, 0.25, 0, width=0.02, color='k', length_includes_head=True)
-    ax.plot(0, 0, 'ko', ms=4, label='start pose (0, 0, 0)')
-    ax.set_aspect('equal')
-    ax.grid(alpha=0.3)
-    ax.set_xlabel('x (m), start heading')
-    ax.set_ylabel('y (m), left of start')
-    ax.set_title(f'EKF SLAM map: {len(est)} landmarks')
-    ax.legend(loc='upper right', fontsize=8)
-    path = os.path.join(out, 'slam_map.png')
-    fig.savefig(path, dpi=150, bbox_inches='tight')
-    print(f'Wrote {path}')
+    tr = (np.array([[float(r['x']), float(r['y'])] for r in read_csv(traj_path)])
+          if os.path.exists(traj_path) else None)
+
+    for unit, fname in (('m', 'slam_map.png'), ('ft', 'slam_map_ft.png')):
+        k = 1.0 / UNITS[unit]          # meters -> this unit
+        small = 'cm' if unit == 'm' else 'in'
+        ks = k * (100 if unit == 'm' else 12)   # meters -> cm or inches
+        print(f'\nEKF found {len(est)} landmarks (map frame = start pose, {unit})')
+        print(f' tag       x        y    2-sigma x / y ({small})')
+        for tid, (p, S) in sorted(est.items()):
+            print(f'{tid:4d}  {p[0] * k:+7.3f}  {p[1] * k:+7.3f}     '
+                  f'{2 * ks * math.sqrt(max(S[0, 0], 0)):5.1f} / '
+                  f'{2 * ks * math.sqrt(max(S[1, 1], 0)):5.1f}')
+
+        fig, ax = plt.subplots(figsize=(7, 7))
+        colors = plt.rcParams['axes.prop_cycle'].by_key()['color']
+        col = {tid: colors[i % len(colors)] for i, tid in enumerate(sorted(est))}
+        if obs:
+            for r in obs:
+                tid = int(r['id'])
+                ax.plot(float(r['seen_x']) * k, float(r['seen_y']) * k, '.', ms=4,
+                        alpha=0.35, color=col.get(tid, 'gray'))
+            ax.plot([], [], '.', color='gray', label='single sightings')
+        if tr is not None:
+            ax.plot(tr[:, 0] * k, tr[:, 1] * k, '-', color='tab:blue', lw=1, alpha=0.7,
+                    label='estimated robot path')
+        I = np.eye(2)
+        for tid, (p, S) in est.items():
+            ax.plot(p[0] * k, p[1] * k, 'x', color=col[tid], ms=9, mew=2)
+            ellipse(ax, p * k, S * k * k, I, col[tid])
+            ax.annotate(str(tid), p * k, textcoords='offset points', xytext=(6, 6),
+                        fontsize=9, color=col[tid])
+        ax.plot([], [], 'x', color='k', ms=8, mew=2, label='EKF tags (2-sigma)')
+        ax.arrow(0, 0, 0.25 * k, 0, width=0.02 * k, color='k', length_includes_head=True)
+        ax.plot(0, 0, 'ko', ms=4, label='start pose (0, 0, 0)')
+        ax.set_aspect('equal')
+        ax.grid(alpha=0.3)
+        ax.set_xlabel(f'x ({unit}), start heading')
+        ax.set_ylabel(f'y ({unit}), left of start')
+        ax.set_title(f'EKF SLAM map: {len(est)} landmarks ({unit})')
+        ax.legend(loc='best', fontsize=8)
+        path = os.path.join(out, fname)
+        fig.savefig(path, dpi=150, bbox_inches='tight')
+        plt.close(fig)
+        print(f'Wrote {path}')
 
 
 def main():

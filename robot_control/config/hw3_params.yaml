@@ -12,10 +12,10 @@ hw3_slam:
     # center_path: false = the start pose is a corner; needs room AHEAD and to
     # the LEFT (n for the square, 2.41 * m for the octagon).
     paths: "square"
-    square_size: 1.0          # n (m) -> corners 0.5 m from the start in x and y
+    square_size: 1.6          # n (m) -> corners 0.5 m from the start in x and y
     octagon_side: 0.6         # m (m) -> corners 0.78 m from the start
     loops: 1                  # times around each path (try 1, then 2 or 3)
-    center_path: true
+    center_path: false
     return_to_start: true
 
     # Tags / camera (same as HW2)
@@ -41,12 +41,16 @@ hw3_slam:
     imu_yaw_sign: 1.0
 
     # Control loop. Shorter steps = more tag sightings = better map.
-    step_time: 0.5            # s of driving per step (~0.25 m)
+    step_time: 0.25           # s of driving per step (~0.25 m)
     settle_time: 0.4
     pos_tol: 0.05
     reach_radius: 0.15
     ang_tol: 0.10
     heading_tol: 0.12
+    # Split turns bigger than this (degrees) into pieces, stopping to look for
+    # tags between them so a turn's error is corrected before it finishes.
+    # 0 = off (turn in one go). Try 45; much smaller pulses get unreliable.
+    max_turn_step_deg: 0.0
     max_blind_steps: 3
     max_steps_per_waypoint: 40
     log_dir: "/home/ubuntu/hw3_logs"

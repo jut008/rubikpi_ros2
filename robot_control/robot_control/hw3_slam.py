@@ -12,7 +12,8 @@ Same stop-and-go loop as HW2, but there is NO tag map. The robot starts at
                 - known ID -> EKF update (after the Mahalanobis gate)
     5. Log:     robot pose + uncertainty every step, every raw odometry step
                 and tag sighting (so replay_slam.py can re-run the filter
-                offline), and a map snapshot after every loop.
+                offline), and a checkpoint after every loop: the whole
+                estimate at that moment, in checkpoints/<path>_loop<n>/.
 
 By default the path is centered on the start pose: the robot drives out to
 one corner, goes around, and comes back to where it started. At the end it
@@ -25,7 +26,6 @@ Then:
     ros2 run robot_control hw3_slam --ros-args \
         --params-file ~/ros2_ws/src/rubikpi_ros2/robot_control/config/hw3_params.yaml
 """
-import csv
 import json
 import math
 import os
@@ -43,6 +43,8 @@ from std_msgs.msg import Float32MultiArray
 
 from robot_control.ekf_slam import (detection_to_range_bearing, make_ekf, path_parts,
                                     sighting_position, wrap)
+from robot_control.slam_logs import (MAP_HEADER, OBS_HEADER, TRAJ_HEADER, landmark_rows,
+                                     map_table, pose_and_sd, write_checkpoint, write_csv)
 from robot_control.tag_localization import TagDetector, tag_in_robot_frame
 
 
@@ -93,6 +95,7 @@ class Hw3Slam(Node):
         P('reach_radius', 0.15)
         P('ang_tol', 0.10)
         P('heading_tol', 0.12)
+        P('max_turn_step_deg', 0.0)      # split bigger turns, with a look between; 0 = off
         P('max_blind_steps', 3)          # steps without a known tag before searching
         P('max_steps_per_waypoint', 40)
         P('log_dir', os.path.expanduser('~/hw3_logs'))
@@ -141,6 +144,9 @@ class Hw3Slam(Node):
         self._imu_raw_prev = None
 
         # --- logs ---
+        # the run's folder is named when the node starts, so loop checkpoints
+        # can be written during the run (a crash keeps the ones already saved)
+        self.out = os.path.join(self.p['log_dir'], time.strftime('hw3_%Y%m%d_%H%M%S'))
         self.t0 = time.time()
         self.wp_index = 0
         self.blind_steps = 0
@@ -304,21 +310,20 @@ class Hw3Slam(Node):
         for tid, (x, y, S) in self.ekf.landmarks().items():
             self.loop_maps.append([path, loop, tid, x, y, S[0, 0], S[0, 1], S[1, 1]])
         self.log_map(f'Map after {path} loop {loop}')
+        self.checkpoint(f'{path}_loop{loop}', path, loop)
+
+    def checkpoint(self, name, path='', loop='', title=None):
+        """Save the whole estimate right now to checkpoints/<name>/ (see slam_logs.py)."""
+        try:
+            folder = write_checkpoint(self.out, name, self.ekf, list(self.traj),
+                                      list(self.sightings), self.t(), path, loop,
+                                      self.dist_traveled, self.angle_turned, title)
+            self.get_logger().info(f'Checkpoint saved: {folder}')
+        except Exception as e:           # never stop the robot over a log write
+            self.get_logger().error(f'Checkpoint {name} not saved: {e}')
 
     def map_table(self):
-        """Readable lines: every landmark's position, uncertainty and sighting counts."""
-        counts = {}
-        for row in self.sightings:
-            c = counts.setdefault(row[2], {'new': 0, 'updated': 0, 'rejected': 0})
-            c[row[10]] += 1                  # result column
-        lines = [' tag      x (m)    y (m)   2-sigma x/y (cm)   seen  used  rejected']
-        for tid, (x, y, S) in sorted(self.ekf.landmarks().items()):
-            c = counts.get(tid, {'new': 0, 'updated': 0, 'rejected': 0})
-            lines.append(f'{tid:4d}   {x:+8.3f} {y:+8.3f}   '
-                         f'{200 * math.sqrt(max(S[0, 0], 0)):6.1f} / '
-                         f'{200 * math.sqrt(max(S[1, 1], 0)):5.1f}     '
-                         f'{sum(c.values()):4d}  {c["new"] + c["updated"]:4d}  {c["rejected"]:6d}')
-        return lines
+        return map_table(self.ekf, self.sightings)
 
     def log_map(self, title):
         x, y, th = self.ekf.pose
@@ -328,6 +333,22 @@ class Hw3Slam(Node):
             self.get_logger().info('  ' + line)
 
     # ---------------- control (same logic as HW2) ----------------
+    def turn_step(self, err, why, prefix=''):
+        """
+        Turn toward a target heading error err (rad). With max_turn_step_deg > 0,
+        a bigger turn is cut to that size: the robot then stops, looks, and
+        re-plans the rest from the corrected estimate on the next step.
+        """
+        cap = math.radians(self.p['max_turn_step_deg'])
+        if cap > 0 and abs(err) > cap:
+            angle = math.copysign(cap, err)
+            self.get_logger().info(f'  {prefix}turn {math.degrees(angle):+.0f} of '
+                                   f'{math.degrees(err):+.0f} deg {why}, then look')
+        else:
+            angle = err
+            self.get_logger().info(f'  {prefix}turn {math.degrees(angle):+.0f} deg {why}')
+        self.turn(angle)
+
     def step_toward(self, wp):
         x, y, th = self.ekf.pose
         dx, dy = wp[0] - x, wp[1] - y
@@ -344,8 +365,7 @@ class Hw3Slam(Node):
             elif (abs(err) > p['heading_tol']
                   and not (abs(err) < math.pi / 2
                            and dist * abs(math.sin(err)) < 0.8 * p['pos_tol'])):
-                self.get_logger().info(f'  turn {math.degrees(err):+.0f} deg to face waypoint')
-                self.turn(err)
+                self.turn_step(err, 'to face waypoint')
             else:
                 ahead = dist * math.cos(err)
                 t = min(p['step_time'], ahead / p['drive_speed'])
@@ -355,8 +375,7 @@ class Hw3Slam(Node):
         err = wrap(wp[2] - th)
         if abs(err) <= p['ang_tol']:
             return True
-        self.get_logger().info(f'  at waypoint; turn {math.degrees(err):+.0f} deg to final heading')
-        self.turn(err)
+        self.turn_step(err, 'to final heading', prefix='at waypoint; ')
         return False
 
     def wait_for_inputs(self, timeout=15.0):
@@ -406,36 +425,27 @@ class Hw3Slam(Node):
 
     # ---------------- logs ----------------
     def save_logs(self):
-        out = os.path.join(self.p['log_dir'], time.strftime('hw3_%Y%m%d_%H%M%S'))
+        out = self.out
         os.makedirs(out, exist_ok=True)
 
         def write(name, header, rows):
-            with open(os.path.join(out, name), 'w', newline='') as f:
-                w = csv.writer(f)
-                w.writerow(header)
-                w.writerows(rows)
+            write_csv(out, name, header, rows)
 
         # events: predict rows = (ds, dtheta); obs rows = (id, range, bearing, result, M)
         write('events.csv', ['t', 'kind', 'a', 'b', 'c', 'd', 'e'], self.events)
-        write('trajectory.csv', ['t', 'x', 'y', 'theta', 'sd_x', 'sd_y', 'sd_theta',
-                                 'n_landmarks', 'waypoint'], self.traj)
+        write('trajectory.csv', TRAJ_HEADER, self.traj)
         write('map_loops.csv', ['path', 'loop', 'id', 'x', 'y', 'sxx', 'sxy', 'syy'],
               self.loop_maps)
-        write('map_final.csv', ['id', 'x', 'y', 'sxx', 'sxy', 'syy'],
-              [[tid, x, y, S[0, 0], S[0, 1], S[1, 1]]
-               for tid, (x, y, S) in self.ekf.landmarks().items()])
+        write('map_final.csv', MAP_HEADER, landmark_rows(self.ekf))
         write('waypoints.csv', ['waypoint', 'path', 'loop', 'goal_x', 'goal_y', 'goal_theta',
                                 'est_x', 'est_y', 'est_theta', 't'], self.wp_results)
         # every detection: robot pose just before it, where that one sighting
         # puts the tag, and the EKF estimate of the tag right after it
-        write('observations.csv', ['t', 'waypoint', 'id', 'range_m', 'bearing_deg',
-                                   'robot_x', 'robot_y', 'robot_theta_deg', 'seen_x', 'seen_y',
-                                   'result', 'mahalanobis', 'est_x', 'est_y'], self.sightings)
+        write('observations.csv', OBS_HEADER, self.sightings)
         with open(os.path.join(out, 'params.json'), 'w') as f:
             json.dump(self.p, f, indent=2)
 
-        x, y, th = self.ekf.pose
-        sd = np.sqrt(np.maximum(np.diag(self.ekf.Sigma)[:3], 0.0))
+        (x, y, th), sd = pose_and_sd(self.ekf)
         summary = [
             f'HW3 EKF SLAM run {os.path.basename(out)}',
             f'paths: {self.p["paths"]}  square_size {self.p["square_size"]} m  '
@@ -454,8 +464,11 @@ class Hw3Slam(Node):
             f'Final robot pose estimate: ({x:+.3f}, {y:+.3f}, {math.degrees(th):+.1f} deg)  '
             f'1-sigma ({sd[0] * 100:.1f} cm, {sd[1] * 100:.1f} cm, {math.degrees(sd[2]):.1f} deg)',
         ]
+        if os.path.exists(os.path.join(out, 'checkpoints.csv')):
+            summary += ['', 'Loop checkpoints: see checkpoints.csv and checkpoints/<name>/']
         with open(os.path.join(out, 'map_summary.txt'), 'w') as f:
             f.write('\n'.join(summary) + '\n')
+        self.checkpoint('final', title=f'Final checkpoint of run {os.path.basename(out)}')
         self.log_map('Final map')
         self.get_logger().info(f'Saved logs to {out}')
 
