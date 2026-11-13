@@ -21,8 +21,8 @@ hw3_slam:
     # Tags / camera (same as HW2)
     tag_size: 0.163           # edge of the BLACK square in meters (6.75 in)
     tag_family: "36h11"
-    max_tag_dist: 3.0         # ignore tags farther than this (m)
-    max_reproj_err: 3.0       # px
+    max_tag_dist: 4.0         # ignore tags farther than this (m)
+    max_reproj_err: 5.0       # px
     camera_offset_x: 0.10     # camera ahead of the robot center (m)
     camera_offset_y: 0.0
     image_is_rectified: false
@@ -51,6 +51,13 @@ hw3_slam:
     # tags between them so a turn's error is corrected before it finishes.
     # 0 = off (turn in one go). Try 45; much smaller pulses get unreliable.
     max_turn_step_deg: 0.0
+    # Search = turning in place to look for tags when none was seen for
+    # max_blind_steps steps. OFF for SLAM: a few blind steps are normal, the
+    # robot keeps to the path on odometry and corrects at the next tag.
+    # Spinning to look added turn error and pulled the robot off the square.
+    # If on, it sweeps at most search_max_deg and turns back if nothing found.
+    search: false
+    search_max_deg: 90.0
     max_blind_steps: 3
     max_steps_per_waypoint: 40
     log_dir: "/home/ubuntu/hw3_logs"

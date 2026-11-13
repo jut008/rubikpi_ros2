@@ -54,6 +54,12 @@ Useful overrides: `-p loops:=2` (more loops, for "does driving more help?"),
 `-p square_size:=0.9`, `-p octagon_side:=0.5`, `-p center_path:=false`
 (start = corner instead of center), `-p return_to_start:=false`.
 
+**Search is off** (`search: false`). It used to spin up to a full circle
+whenever no known tag was seen for a few steps, which added turn error and
+pulled the robot off the square. For SLAM the robot just keeps following the
+path and corrects at the next tag. If you turn it on (`-p search:=true`), it
+sweeps at most `search_max_deg` (90) and turns back if it finds nothing.
+
 Suggested runs for the report:
 - square, 1 loop and square, 2-3 loops
 - octagon, 1 loop and octagon, 2-3 loops

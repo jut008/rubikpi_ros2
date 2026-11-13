@@ -96,7 +96,9 @@ class Hw3Slam(Node):
         P('ang_tol', 0.10)
         P('heading_tol', 0.12)
         P('max_turn_step_deg', 0.0)      # split bigger turns, with a look between; 0 = off
-        P('max_blind_steps', 3)          # steps without a known tag before searching
+        P('search', False)               # look around when blind (off: just keep driving)
+        P('search_max_deg', 90.0)        # max sweep per search, then turn back
+        P('max_blind_steps', 3)          # steps without seeing a tag before searching
         P('max_steps_per_waypoint', 40)
         P('log_dir', os.path.expanduser('~/hw3_logs'))
         # --- EKF noise (see ekf_slam.EKFSlam) ---
@@ -265,6 +267,7 @@ class Hw3Slam(Node):
             self.record()
             return 0
         n_upd = 0
+        n_seen = 0                       # new + updated (not rejected)
         msgs = []
         for d in self.detector.detect(img, self.K, self.D):
             if d['dist'] > self.p['max_tag_dist'] or d['candidates'][0][2] > self.p['max_reproj_err']:
@@ -282,23 +285,39 @@ class Hw3Slam(Node):
                                    *pose[:2], math.degrees(pose[2]), seen_x, seen_y,
                                    result, '' if m is None else m, est_x, est_y])
             n_upd += result == 'updated'
+            n_seen += result != 'rejected'
             msgs.append(f'{d["id"]}:{result}' + ('' if m is None else f'(M={m:.1f})'))
         x, y, th = self.ekf.pose
         self.get_logger().info(
             f'  tags [{", ".join(msgs) or "none"}] -> pose ({x:+.2f}, {y:+.2f}, '
             f'{math.degrees(th):+.0f} deg), {self.ekf.n_landmarks} landmarks')
-        self.blind_steps = 0 if n_upd else self.blind_steps + 1
+        # a first sighting of a new tag counts too: the robot isn't lost, it's mapping
+        self.blind_steps = 0 if n_seen else self.blind_steps + 1
         self.record()
         return n_upd
 
     def search(self):
-        """Turn in small steps until a known landmark is seen (max one turn)."""
+        """
+        Off by default (search: false). In SLAM, a few steps without a known
+        tag is normal: the robot keeps following the path on odometry and
+        corrects at the next sighting. Spinning to look adds timed-turn error
+        and pulls the robot off the path.
+
+        When on: turn left in small steps, at most search_max_deg, until a
+        known tag corrects the pose. If none does, turn back to the heading it
+        started at, so the robot resumes the path where it left it.
+        """
         self.get_logger().warn('No known tag for a while: searching')
+        limit = math.radians(self.p['search_max_deg'])
         turned = 0.0
-        while turned < 2 * math.pi and rclpy.ok():
-            turned += abs(self.turn(-self.p['search_step'], cmd=self.p['search_cmd']))
+        while turned < limit - 1e-6 and rclpy.ok():
+            step = min(self.p['search_step'], limit - turned)
+            turned += self.turn(step, cmd=self.p['search_cmd'])
             if self.look():
                 return True
+        if turned and rclpy.ok():
+            self.get_logger().info(f'  nothing found; turning back {math.degrees(turned):.0f} deg')
+            self.turn(-turned)
         return False
 
     def record(self):
@@ -407,11 +426,11 @@ class Hw3Slam(Node):
                     return
                 if self.step_toward(wp):
                     break
-                if (not self.look() and self.ekf.n_landmarks
+                if (not self.look() and self.p['search'] and self.ekf.n_landmarks
                         and self.blind_steps > self.p['max_blind_steps']):
                     if not self.search():
-                        self.get_logger().warn('Nothing found after a full turn; continuing')
-                        self.blind_steps = 0
+                        self.get_logger().warn('No known tag found; continuing on odometry')
+                    self.blind_steps = 0
             x, y, th = self.ekf.pose
             self.wp_results.append([i, path, loop, *wp, x, y, th, self.t()])
             if last:
