@@ -20,7 +20,7 @@ hw3_slam:
     return_to_start: true
 
     # Tags / camera (same as HW2)
-    tag_size: 0.163           # edge of the BLACK square in meters (6.75 in)
+    tag_size: 0.157            # edge of the BLACK square in meters (6.75 in)
     tag_family: "36h11"
     max_tag_dist: 4.0         # ignore tags farther than this (m)
     max_reproj_err: 5.0       # px
@@ -49,16 +49,18 @@ hw3_slam:
     step_time: 0.25           # s of driving per step (~0.25 m)
     settle_time: 0.4
     pos_tol: 0.05
-    reach_radius: 0.15
+    reach_radius: 0.08
     ang_tol: 0.10
     heading_tol: 0.12
+    edge_bearing_deg: 25.0
+    edge_noise_scale: 3.0     # 1.0 = off
     # Split turns bigger than this (degrees) into pieces, stopping to look for
     # tags between them so a turn's error is corrected before it finishes.
     # 0 = off (turn in one go). Try 45; much smaller pulses get unreliable.
     # 45: corners are turned 45 + 45 with a look between, so a known tag seen
     # mid-turn corrects a short timed turn (sim: halves the map error and keeps
     # the robot farther from the walls; timed turns ran ~10% short on Nov 13).
-    max_turn_step_deg: 45.0
+    max_turn_step_deg: 0.0
     # Search = turning in place to look for tags when none was seen for
     # max_blind_steps steps. OFF for SLAM: a few blind steps are normal, the
     # robot keeps to the path on odometry and corrects at the next tag.
@@ -77,10 +79,10 @@ hw3_slam:
     # Too small Q -> filter ignores tags and the map smears.
     # Too small R -> pose jumps around. Tune offline with replay_slam.py.
     k_s: 0.05
-    k_theta: 0.10
+    k_theta: 0.25 # 0.1 -> 0.25 now
     k_s_theta: 0.2            # was 0.05: too sure drives were straight -> rejected good tags
     min_sigma_s: 0.005
-    min_sigma_theta: 0.005
+    min_sigma_theta: 0.05 # 0.005 -> 0.05
     sigma_r0: 0.02
     k_r: 0.03
     sigma_b_deg: 2.0
