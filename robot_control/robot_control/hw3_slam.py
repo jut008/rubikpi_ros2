@@ -95,6 +95,7 @@ class Hw3Slam(Node):
         P('settle_time', 0.4)
         P('pos_tol', 0.05)
         P('reach_radius', 0.15)
+        P('back_up_deg', 90.0)           # waypoint this far behind and close -> reverse to it
         P('ang_tol', 0.10)
         P('heading_tol', 0.12)
         P('max_turn_step_deg', 45.0)     # split bigger turns, with a look between; 0 = off
@@ -115,6 +116,7 @@ class Hw3Slam(Node):
         P('gate', 9.21)
         P('edge_bearing_deg', 25.0)      # sightings beyond this bearing get extra noise
         P('edge_noise_scale', 3.0)       # up to 3x the range/bearing std dev; 1 = off
+        P('new_tag_max_bearing_deg', 30.0)  # add a NEW tag only when seen within this; 0 = off
 
         self.p = {n: prm.value for n, prm in self.get_parameters_by_prefix('').items()
                   if n != 'use_sim_time'}
@@ -156,6 +158,7 @@ class Hw3Slam(Node):
         self.t0 = time.time()
         self.wp_index = 0
         self.blind_steps = 0
+        self.wp_reached = False
         self.dist_traveled = 0.0
         self.angle_turned = 0.0
         self.events = []      # t, kind, a, b, c, d, e (see save_logs)
@@ -277,24 +280,37 @@ class Hw3Slam(Node):
         n_upd = 0
         n_seen = 0                       # new + updated (not rejected)
         msgs = []
+        dets = []
         for d in self.detector.detect(img, self.K, self.D):
             if d['dist'] > self.p['max_tag_dist'] or d['candidates'][0][2] > self.p['max_reproj_err']:
                 continue
             rvec, tvec, _ = d['candidates'][0]
             fx, ly, _ = tag_in_robot_frame(rvec, tvec, self.cam_offset)
-            r, b = detection_to_range_bearing(fx, ly)
+            dets.append((d['id'], *detection_to_range_bearing(fx, ly)))
+        lim = math.radians(self.p['new_tag_max_bearing_deg'])
+        known_in_view = any(tid in self.ekf.ids for tid, _, _ in dets)
+        for tid, r, b in dets:
+            if lim > 0 and known_in_view and tid not in self.ekf.ids and abs(b) > lim:
+                # first sighting at the image edge: range/bearing are least
+                # accurate there, and a badly placed new tag later drags the
+                # robot. A mapped tag is in view, so wait until this one is
+                # seen closer to the center. (With nothing mapped in view,
+                # it's added anyway: an edge tag beats no tag.)
+                self.events.append([self.t(), 'deferred', tid, r, b, '', ''])
+                msgs.append(f'{tid}:deferred({math.degrees(b):+.0f})')
+                continue
             pose = self.ekf.pose
             seen_x, seen_y = sighting_position(pose, r, b)
-            result, m = self.ekf.observe(d['id'], r, b)
-            self.events.append([self.t(), 'obs', d['id'], r, b, result,
+            result, m = self.ekf.observe(tid, r, b)
+            self.events.append([self.t(), 'obs', tid, r, b, result,
                                 '' if m is None else m])
-            est_x, est_y, _ = self.ekf.landmarks()[d['id']]
-            self.sightings.append([self.t(), self.wp_index, d['id'], r, math.degrees(b),
+            est_x, est_y, _ = self.ekf.landmarks()[tid]
+            self.sightings.append([self.t(), self.wp_index, tid, r, math.degrees(b),
                                    *pose[:2], math.degrees(pose[2]), seen_x, seen_y,
                                    result, '' if m is None else m, est_x, est_y])
             n_upd += result == 'updated'
             n_seen += result != 'rejected'
-            msgs.append(f'{d["id"]}:{result}' + ('' if m is None else f'(M={m:.1f})'))
+            msgs.append(f'{tid}:{result}' + ('' if m is None else f'(M={m:.1f})'))
         x, y, th = self.ekf.pose
         self.get_logger().info(
             f'  tags [{", ".join(msgs) or "none"}] -> pose ({x:+.2f}, {y:+.2f}, '
@@ -383,9 +399,21 @@ class Hw3Slam(Node):
         p = self.p
         along = dx * math.cos(th) + dy * math.sin(th)
         sideways_only = dist <= p['reach_radius'] and abs(along) <= p['pos_tol']
-        if dist > p['pos_tol'] and not sideways_only:
+        if dist <= p['pos_tol'] or sideways_only:
+            # Once reached, the waypoint stays reached: a later correction of
+            # the estimate (a tag seen while turning to the final heading) must
+            # not send the robot driving back to it. The next waypoint's
+            # planning starts from the corrected estimate anyway.
+            if not self.wp_reached:
+                self.get_logger().info(f'  reached (within {dist * 100:.0f} cm)')
+            self.wp_reached = True
+        if not self.wp_reached:
             err = wrap(math.atan2(dy, dx) - th)
-            if dist < 0.35 and abs(err) > 2.0:
+            side = dist * abs(math.sin(err))
+            if (dist < 0.35 and abs(err) > math.radians(p['back_up_deg'])
+                    and side <= p['reach_radius']):
+                # waypoint is behind and backing straight up lands within the
+                # reach radius: reverse instead of turning around (turns add error)
                 back = -along
                 self.get_logger().info(f'  back up {back:.2f} m')
                 self.drive(min(p['step_time'], back / p['drive_speed']), backward=True)
@@ -429,6 +457,7 @@ class Hw3Slam(Node):
                      'back to start' if path == 'return' else f'to the {path}')
             self.get_logger().info(f'=== {stage}, waypoint {i}: '
                                    f'({wp[0]:.2f}, {wp[1]:.2f}, {math.degrees(wp[2]):.0f} deg) ===')
+            self.wp_reached = False
             for _ in range(self.p['max_steps_per_waypoint']):
                 if not rclpy.ok():
                     return

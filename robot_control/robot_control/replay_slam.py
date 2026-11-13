@@ -16,6 +16,7 @@ import argparse
 import copy
 import csv
 import json
+import math
 import os
 import sys
 
@@ -37,35 +38,53 @@ def replay(log_dir, overrides=None):
     dist = rot = 0.0
     t = 0.0
     with open(os.path.join(log_dir, 'events.csv')) as f:
-        for row in csv.DictReader(f):
-            t = float(row['t'])
-            if row['kind'] == 'predict':
-                ekf.predict(float(row['a']), float(row['b']))
-                dist += abs(float(row['a']))
-                rot += abs(float(row['b']))
-            elif row['kind'] == 'obs':
-                tid, r, b = int(row['a']), float(row['b']), float(row['c'])
-                pose = ekf.pose
-                seen = sighting_position(pose, r, b)
-                result, m = ekf.observe(tid, r, b)
-                counts[result] += 1
-                est = ekf.landmarks()[tid]
-                sightings.append([row['t'], '', tid, r, np.degrees(b), pose[0], pose[1],
-                                  np.degrees(pose[2]), *seen, result,
-                                  '' if m is None else m, est[0], est[1]])
-            elif row['kind'] == 'loop_end':
-                for tid, (x, y, S) in ekf.landmarks().items():
-                    loop_maps.append([row['a'], row['b'], tid, x, y,
-                                      S[0, 0], S[0, 1], S[1, 1]])
-            x, y, th = ekf.pose
-            sd = np.sqrt(np.maximum(np.diag(ekf.Sigma)[:3], 0.0))
-            traj.append([row['t'], x, y, th, *sd, ekf.n_landmarks, ''])
-            if row['kind'] == 'loop_end':
-                # a frozen copy of the filter + how many log rows exist at this moment
-                checkpoints.append({'name': f"{row['a']}_loop{row['b']}", 'path': row['a'],
-                                    'loop': row['b'], 't': t, 'ekf': copy.deepcopy(ekf),
-                                    'n_traj': len(traj), 'n_obs': len(sightings),
-                                    'dist': dist, 'rot': rot})
+        rows = list(csv.DictReader(f))
+    # tags in each look (a run of consecutive obs rows), for the new-tag rule
+    look_ids, cur = [], []
+    for row in rows:
+        if row['kind'] == 'obs':
+            cur.append(int(row['a']))
+        elif row['kind'] != 'deferred':
+            cur = []
+        look_ids.append(cur)
+    lim = math.radians(p.get('new_tag_max_bearing_deg', 0.0) or 0.0)
+    known_in_view = False
+    for k, row in enumerate(rows):
+        t = float(row['t'])
+        if row['kind'] in ('obs', 'deferred') and (k == 0 or rows[k - 1]['kind']
+                                                   not in ('obs', 'deferred')):
+            known_in_view = any(i in ekf.ids for i in look_ids[k])
+        if row['kind'] == 'predict':
+            ekf.predict(float(row['a']), float(row['b']))
+            dist += abs(float(row['a']))
+            rot += abs(float(row['b']))
+        elif row['kind'] in ('obs', 'deferred'):
+            tid, r, b = int(row['a']), float(row['b']), float(row['c'])
+            if row['kind'] == 'deferred':
+                continue              # the robot skipped it too
+            if lim > 0 and known_in_view and tid not in ekf.ids and abs(b) > lim:
+                continue              # same rule as the robot, for old logs
+            pose = ekf.pose
+            seen = sighting_position(pose, r, b)
+            result, m = ekf.observe(tid, r, b)
+            counts[result] += 1
+            est = ekf.landmarks()[tid]
+            sightings.append([row['t'], '', tid, r, np.degrees(b), pose[0], pose[1],
+                              np.degrees(pose[2]), *seen, result,
+                              '' if m is None else m, est[0], est[1]])
+        elif row['kind'] == 'loop_end':
+            for tid, (x, y, S) in ekf.landmarks().items():
+                loop_maps.append([row['a'], row['b'], tid, x, y,
+                                  S[0, 0], S[0, 1], S[1, 1]])
+        x, y, th = ekf.pose
+        sd = np.sqrt(np.maximum(np.diag(ekf.Sigma)[:3], 0.0))
+        traj.append([row['t'], x, y, th, *sd, ekf.n_landmarks, ''])
+        if row['kind'] == 'loop_end':
+            # a frozen copy of the filter + how many log rows exist at this moment
+            checkpoints.append({'name': f"{row['a']}_loop{row['b']}", 'path': row['a'],
+                                'loop': row['b'], 't': t, 'ekf': copy.deepcopy(ekf),
+                                'n_traj': len(traj), 'n_obs': len(sightings),
+                                'dist': dist, 'rot': rot})
     checkpoints.append({'name': 'final', 'path': '', 'loop': '', 't': t, 'ekf': ekf,
                         'n_traj': len(traj), 'n_obs': len(sightings), 'dist': dist, 'rot': rot})
     return ekf, traj, loop_maps, sightings, counts, p, checkpoints
@@ -76,10 +95,11 @@ def main():
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument('log_dir')
     ap.add_argument('--out', default='replay')
-    for n in EKF_PARAMS:
+    for n in EKF_PARAMS + ['new_tag_max_bearing_deg']:
         ap.add_argument(f'--{n}', type=float)
     a = ap.parse_args()
-    over = {n: getattr(a, n) for n in EKF_PARAMS if getattr(a, n) is not None}
+    over = {n: getattr(a, n) for n in EKF_PARAMS + ['new_tag_max_bearing_deg']
+            if getattr(a, n) is not None}
     ekf, traj, loop_maps, sightings, counts, p, checkpoints = replay(a.log_dir, over)
 
     out = os.path.join(a.log_dir, a.out)

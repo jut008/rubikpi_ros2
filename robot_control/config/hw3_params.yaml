@@ -12,11 +12,11 @@ hw3_slam:
     # about n/2 for the square, 1.31 * m for the octagon's corners.
     # center_path: false = the start pose is a corner; needs room AHEAD and to
     # the LEFT (n for the square, 2.41 * m for the octagon).
-    paths: "square"
+    paths: "octagon"
     square_size: 1.0          # n (m). Start 0.72 m from the right + back walls (8 ft area)
-    octagon_side: 0.6         # m (m) -> corners 0.78 m from the start
+    octagon_side: 0.5         # m (m) -> corners 0.78 m from the start
     loops: 5                  # times around each path (try 1, then 2 or 3)
-    center_path: false
+    center_path: true
     return_to_start: true
 
     # Tags / camera (same as HW2)
@@ -35,7 +35,7 @@ hw3_slam:
     # "Straight" drives curve LEFT about 10-16 deg per meter (fit from the
     # Nov 13 runs: tags drift sideways while driving). Without the IMU the
     # odometry assumes this average curve. Re-fit if the wheels/battery change.
-    drive_curve_deg_per_m: 26.0 # 12 -> 26.0
+    drive_curve_deg_per_m: 15.0 # 12 -> 26.0 -> 15.0
     turn_cmd: 0.3
     turn_rate: 2.051
     turn_rate_left: 1.81 #1.963 -> 1.81
@@ -49,11 +49,13 @@ hw3_slam:
     step_time: 0.25           # s of driving per step (~0.25 m)
     settle_time: 0.4
     pos_tol: 0.05
-    reach_radius: 0.08
+    reach_radius: 0.12 # 0.08 for square, 0.12 for octogon
     ang_tol: 0.2  # 0.10 -> 0.2
-    heading_tol: 0.12 # 0.12 -> 0.25
+    heading_tol: 0.25 # 0.12 for 5loop square, 0.25 for octagon, 
     edge_bearing_deg: 25.0
     edge_noise_scale: 3.0     # 1.0 = off
+    back_up_deg: 90.0
+    new_tag_max_bearing_deg: 30.0   # 0 = off
     # Split turns bigger than this (degrees) into pieces, stopping to look for
     # tags between them so a turn's error is corrected before it finishes.
     # 0 = off (turn in one go). Try 45; much smaller pulses get unreliable.
