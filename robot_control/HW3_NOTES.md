@@ -25,17 +25,39 @@ Code: `ekf_slam.py` (filter), `hw3_slam.py` (robot node), `replay_slam.py`
    a line for its heading) and measure it in the same world frame:
    x0, y0, and heading in degrees CCW from world +x. The robot does NOT get
    this; it's only used afterwards to compare maps.
-5. **Check the room around the start.** The path is centered on the start
-   pose. Closest the robot center gets to a wall in an 8 ft area:
+5. **Place the robot.** Default (`center_path: false`): the robot starts at
+   a **corner of the path**, drives straight ahead one side, turns left,
+   and goes around counter-clockwise back to its start. The path lies
+   AHEAD and to the LEFT of the start. To center the path in an 8 ft
+   (2.44 m) area, put the robot's center this far from the walls:
 
-   | start | square n = 1.0 m | octagon m = 0.6 m |
-   |---|---|---|
-   | center | 0.72 m | 0.49 m |
-   | ~25 cm off center | 0.34 m | 0.24 m |
+   | path | from the right wall | from the back wall | closest to any wall |
+   |---|---|---|---|
+   | square n = 1.6 m | 0.42 m | 0.42 m | 0.42 m (tight) |
+   | square n = 1.2 m | 0.62 m | 0.62 m | 0.62 m |
+   | square n = 1.0 m (default) | 0.72 m | 0.72 m | 0.72 m |
+   | octagon m = 0.6 m | 0.50 m | 0.92 m (it swings 0.42 m behind the start) | 0.50 m |
 
-   Far off center with the octagon, use `-p octagon_side:=0.5`.
-6. **Optional, recommended**: recalibrate turns. The first test drifted about
-   28 deg over 4 turns. The EKF corrects it with tags, but less drift = better map.
+   ("right" and "back" = relative to the way the robot faces at the start.)
+
+   Or `-p center_path:=true`: put the robot in the middle; it drives
+   straight ahead half a side, turns left, goes around the path centered on
+   its start, and comes back to the middle.
+6. **Straighten the drive** (do this whenever the battery or floor changes).
+   The Nov 13 runs curved LEFT about 12-16 deg per meter on "straight"
+   drives; with the filter set to expect straight drives it rejected good
+   tags, got lost by the 3rd corner, and drove into a tag. Run, with
+   `motor_control` running:
+   ```bash
+   python3 ~/ros2_ws/src/rubikpi_ros2/robot_control/robot_control/calibrate_motion.py \
+       --straight --drive-left 0.32 --drive-right 0.40
+   ```
+   It drives ~1 m, you type how far forward and how far sideways it ended,
+   and it suggests new `drive_left`/`drive_right`; repeat until it says
+   "Straight enough", then paste its lines into `hw3_params.yaml`
+   (`drive_curve_deg_per_m` = whatever curve is left; 0 if straight).
+   The current `drive_curve_deg_per_m: 12` + `k_s_theta: 0.2` already let
+   the filter cope with the curve (fit from the logs) if you skip this.
 
 ## Running
 
@@ -51,8 +73,8 @@ Then the same with `-p paths:=octagon`. **Do them as separate runs**: the
 assignment compares the two maps (`square,octagon` builds one combined map).
 
 Useful overrides: `-p loops:=2` (more loops, for "does driving more help?"),
-`-p square_size:=0.9`, `-p octagon_side:=0.5`, `-p center_path:=false`
-(start = corner instead of center), `-p return_to_start:=false`.
+`-p square_size:=1.0`, `-p octagon_side:=0.5`, `-p center_path:=true`
+(start in the middle of the path instead of a corner), `-p return_to_start:=false`.
 
 **Search is off** (`search: false`). It used to spin up to a full circle
 whenever no known tag was seen for a few steps, which added turn error and

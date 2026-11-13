@@ -248,7 +248,9 @@ def path_parts(name, size, centered=True):
         room AHEAD and to its LEFT (n for the square, 2.41 * m for the octagon).
     centered=True:  the path is centered on the start pose, so it only needs
         about n/2 (square) or 1.31 * m (octagon corners) of room in every
-        direction. The robot first drives to one corner (entry), then goes around.
+        direction. The robot first drives STRAIGHT AHEAD to the middle of the
+        side in front of it (entry), turns left, and goes around from there;
+        each loop ends back at that mid-side point.
     """
     corners = _corners(name, size)
     if not centered:
@@ -256,7 +258,14 @@ def path_parts(name, size, centered=True):
     cx = sum(c[0] for c in corners) / len(corners)
     cy = sum(c[1] for c in corners) / len(corners)
     shifted = [(round(x - cx, 6), round(y - cy, 6), th) for x, y, th in corners]
-    return [shifted[0]], shifted[1:] + [shifted[0]]
+    # the side straight ahead of the start is the one driven at heading +90 deg
+    # (each corner stores the heading of the side that starts there)
+    n = len(shifted)
+    i = next(k for k in range(n) if abs(wrap(shifted[k][2] - math.pi / 2)) < 1e-6)
+    a, b = shifted[i], shifted[(i + 1) % n]
+    mid = (round((a[0] + b[0]) / 2, 6), round((a[1] + b[1]) / 2, 6), math.pi / 2)
+    loop = [shifted[(i + 1 + k) % n] for k in range(n)] + [mid]
+    return [mid], loop
 
 
 def square_path(n, loops=1, centered=True):

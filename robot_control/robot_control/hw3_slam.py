@@ -15,8 +15,9 @@ Same stop-and-go loop as HW2, but there is NO tag map. The robot starts at
                 offline), and a checkpoint after every loop: the whole
                 estimate at that moment, in checkpoints/<path>_loop<n>/.
 
-By default the path is centered on the start pose: the robot drives out to
-one corner, goes around, and comes back to where it started. At the end it
+With center_path the path is centered on the start pose: the robot drives
+straight ahead to the middle of the side in front of it, turns left, goes
+around, and comes back to where it started. At the end it
 prints the map and writes map_summary.txt + observations.csv for the report.
 
 Needs (in other terminals):
@@ -61,7 +62,7 @@ class Hw3Slam(Node):
         P('square_size', 1.0)            # n, meters
         P('octagon_side', 0.6)           # m, meters
         P('loops', 1)                    # times around each path
-        P('center_path', True)           # path centered on the start pose (else start = corner)
+        P('center_path', False)          # False: start = a corner of the path; True: path centered on start
         P('return_to_start', True)       # drive back to (0, 0, 0) at the end
         # --- tags / camera ---
         P('tag_size', 0.163)
@@ -77,6 +78,7 @@ class Hw3Slam(Node):
         P('drive_left', 0.32)
         P('drive_right', 0.40)
         P('drive_speed', 0.495)
+        P('drive_curve_deg_per_m', 12.0)  # heading change per meter of "straight" drive (+ = left)
         P('turn_cmd', 0.3)
         P('turn_rate', 2.051)
         P('turn_rate_left', 1.963)
@@ -95,7 +97,7 @@ class Hw3Slam(Node):
         P('reach_radius', 0.15)
         P('ang_tol', 0.10)
         P('heading_tol', 0.12)
-        P('max_turn_step_deg', 0.0)      # split bigger turns, with a look between; 0 = off
+        P('max_turn_step_deg', 45.0)     # split bigger turns, with a look between; 0 = off
         P('search', False)               # look around when blind (off: just keep driving)
         P('search_max_deg', 90.0)        # max sweep per search, then turn back
         P('max_blind_steps', 3)          # steps without seeing a tag before searching
@@ -104,7 +106,7 @@ class Hw3Slam(Node):
         # --- EKF noise (see ekf_slam.EKFSlam) ---
         P('k_s', 0.05)
         P('k_theta', 0.10)
-        P('k_s_theta', 0.05)
+        P('k_s_theta', 0.2)
         P('min_sigma_s', 0.005)
         P('min_sigma_theta', 0.005)
         P('sigma_r0', 0.02)
@@ -239,8 +241,12 @@ class Hw3Slam(Node):
         yaw0 = self.imu_yaw if self.imu_ok() else None
         self.run_for(sgn * self.p['drive_left'], sgn * self.p['drive_right'], duration)
         time.sleep(self.p['settle_time'])
-        dth = (self.imu_yaw - yaw0) if yaw0 is not None else 0.0
         d = sgn * self.p['drive_speed'] * duration
+        if yaw0 is not None:
+            dth = self.imu_yaw - yaw0
+        else:
+            # "straight" drives curve (left wheel slower); model the average curve
+            dth = math.radians(self.p['drive_curve_deg_per_m']) * d
         self.predict(d, dth)
         self.dist_traveled += abs(d)
 

@@ -1,0 +1,17 @@
+HW3 EKF SLAM run hw3_20261112_235639
+paths: square  square_size 1.0 m  octagon_side 0.6 m  loops 1  centered False
+waypoints reached: 3 of 4
+driven 3.86 m, turned 862 deg, 63 s
+
+Map frame = robot start pose: origin at the start position, +x = starting
+heading, +y = 90 deg to its left. Positions in meters.
+
+Landmarks found: 5
+ tag      x (m)    y (m)   2-sigma x/y (cm)   seen  used  rejected
+   0     +2.047   +1.064      6.7 /   7.2        9     9       0
+   2     +1.127   +1.967     53.1 /  12.2       11    11       0
+   5     -0.282   +0.741     20.8 /  30.4        7     7       0
+   7     +0.374   +0.079     31.8 /  25.7        1     1       0
+   8     +0.459   +1.888     53.0 /   9.9       12    12       0
+
+Final robot pose estimate: (+0.076, +0.269, -105.8 deg)  1-sigma (14.5 cm, 13.5 cm, 18.3 deg)

@@ -1,0 +1,12 @@
+Final checkpoint of run hw3_20261113_003709
+time 35.6 s, driven 1.36 m, turned 421 deg
+
+Map frame = robot start pose: origin at the start position, +x = starting
+heading, +y = 90 deg to its left. Positions in meters.
+
+Landmarks found: 2
+ tag      x (m)    y (m)   2-sigma x/y (cm)   seen  used  rejected
+   0     +1.791   +0.813      7.5 /   7.0       33     4      29
+   3     +1.863   +0.167      7.4 /   6.3       33     4      29
+
+Robot pose estimate: (+1.333, +0.007, -60.4 deg)  1-sigma (4.0 cm, 9.0 cm, 10.7 deg)
