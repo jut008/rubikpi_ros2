@@ -100,7 +100,7 @@ def main():
                          c['t'], c['path'], c['loop'], c['dist'], c['rot'])
     with open(os.path.join(out, 'params.json'), 'w') as f:
         json.dump(p, f, indent=2)
-    settings = {n: p[n] for n in EKF_PARAMS}
+    settings = {n: p.get(n) for n in EKF_PARAMS}
     print(f'EKF settings: {settings}')
     print(f'Sightings: {counts}')
     print(f'{ekf.n_landmarks} landmarks; final pose '

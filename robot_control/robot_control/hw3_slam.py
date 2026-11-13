@@ -113,6 +113,8 @@ class Hw3Slam(Node):
         P('k_r', 0.03)
         P('sigma_b_deg', 2.0)
         P('gate', 9.21)
+        P('edge_bearing_deg', 25.0)      # sightings beyond this bearing get extra noise
+        P('edge_noise_scale', 3.0)       # up to 3x the range/bearing std dev; 1 = off
 
         self.p = {n: prm.value for n, prm in self.get_parameters_by_prefix('').items()
                   if n != 'use_sim_time'}

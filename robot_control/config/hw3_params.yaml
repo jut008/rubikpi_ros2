@@ -15,7 +15,7 @@ hw3_slam:
     paths: "square"
     square_size: 1.0          # n (m). Start 0.72 m from the right + back walls (8 ft area)
     octagon_side: 0.6         # m (m) -> corners 0.78 m from the start
-    loops: 1                  # times around each path (try 1, then 2 or 3)
+    loops: 5                  # times around each path (try 1, then 2 or 3)
     center_path: false
     return_to_start: true
 
@@ -31,15 +31,15 @@ hw3_slam:
     # Motion, copied from HW2's calibration
     drive_left: 0.32
     drive_right: 0.40
-    drive_speed: 0.495
+    drive_speed: 0.4 # 0.495 -> 0.43 -> 0.4
     # "Straight" drives curve LEFT about 10-16 deg per meter (fit from the
     # Nov 13 runs: tags drift sideways while driving). Without the IMU the
     # odometry assumes this average curve. Re-fit if the wheels/battery change.
-    drive_curve_deg_per_m: 12.0
+    drive_curve_deg_per_m: 26.0 # 12 -> 26.0
     turn_cmd: 0.3
     turn_rate: 2.051
-    turn_rate_left: 1.963
-    turn_rate_right: 2.138
+    turn_rate_left: 1.81 #1.963 -> 1.81
+    turn_rate_right: 1.88  # 2.138 -> 1.88
     search_cmd: 0.3
     search_step: 0.35
     use_imu: false
@@ -50,8 +50,8 @@ hw3_slam:
     settle_time: 0.4
     pos_tol: 0.05
     reach_radius: 0.08
-    ang_tol: 0.10
-    heading_tol: 0.12
+    ang_tol: 0.2  # 0.10 -> 0.2
+    heading_tol: 0.12 # 0.12 -> 0.25
     edge_bearing_deg: 25.0
     edge_noise_scale: 3.0     # 1.0 = off
     # Split turns bigger than this (degrees) into pieces, stopping to look for
@@ -60,7 +60,7 @@ hw3_slam:
     # 45: corners are turned 45 + 45 with a look between, so a known tag seen
     # mid-turn corrects a short timed turn (sim: halves the map error and keeps
     # the robot farther from the walls; timed turns ran ~10% short on Nov 13).
-    max_turn_step_deg: 0.0
+    max_turn_step_deg: 45.0 # 0.0 -> 45.0 after re-calibration
     # Search = turning in place to look for tags when none was seen for
     # max_blind_steps steps. OFF for SLAM: a few blind steps are normal, the
     # robot keeps to the path on odometry and corrects at the next tag.
