@@ -24,7 +24,7 @@ hw4_navigator:
     # Robot footprint: radius of the circle that encloses the robot, measured
     # from the center of rotation. safety_margin is extra room on top of it.
     robot_radius: 0.15
-    safety_margin: 0.05
+    safety_margin: 0.12
 
     # ---------------- landmarks ----------------
     # Every tag needs its OWN AprilTag ID. The figure reuses LM1-LM4 for the
@@ -48,19 +48,19 @@ hw4_navigator:
               1.524,  1.7526, 1.2954, 1.524]
     tag_yaw: [-1.5708, -1.5708, 3.14159, 3.14159, 1.5708, 1.5708, 0.0, 0.0,
               0.0, 1.5708, -1.5708, 3.14159]
-    tag_size: 0.163
+    tag_size: 0.157
     tag_family: "36h11"
 
     # ---------------- planning ----------------
     planner: "safe"            # "safe" (Voronoi) or "fast" (visibility graph)
     grid_res: 0.02             # m, grid cell size for the Voronoi planner
-    simplify_tol: 0.15         # m, max sideways deviation when simplifying the safe path
+    simplify_tol: 0.2         # m, max sideways deviation when simplifying the safe path
     clearance_slack: 0.03      # m, clearance the simplified safe path may give up
     tie_tol: 0.02              # paths within 2% of the best length count as ties;
                                # ties go to the path that sees more tags
 
     # Camera model, only used to score how many tags a path can see.
-    camera_hfov: 1.0           # rad, horizontal field of view
+    camera_hfov: 1.3           # rad, horizontal field of view
     max_tag_dist: 2.5          # m
     max_tag_view_angle: 1.05   # rad, how far off-axis a tag can still be read
 
@@ -70,11 +70,13 @@ hw4_navigator:
     image_is_rectified: false
     drive_left: 0.32
     drive_right: 0.40
-    drive_speed: 0.495
+    drive_speed: 0.40
     turn_cmd: 0.3
     turn_rate: 2.051
     turn_rate_left: 1.963
     turn_rate_right: 2.138
-    step_time: 1.0
+    step_time: 0.25
     settle_time: 0.4
     step_overhead: 1.0         # s per stop-and-go step (settle + photo), for time estimates
+
+    drive_curve_deg_per_m: 15.0
