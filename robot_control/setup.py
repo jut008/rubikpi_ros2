@@ -13,7 +13,8 @@ setup(
         ('share/' + package_name + '/launch', ['launch/robot_teleop_launch.py',
                                                'launch/hw2_launch.py']),
         ('share/' + package_name + '/config', ['config/hw2_params.yaml',
-                                               'config/hw3_params.yaml']),
+                                               'config/hw3_params.yaml',
+                                               'config/hw4_params.yaml']),
     ],
     install_requires=[
         'setuptools',

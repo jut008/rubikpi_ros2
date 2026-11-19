@@ -1,0 +1,80 @@
+# Parameters for HW4 path planning (hw4_planning.py, plot_hw4.py) and the
+# hw4 navigator. Edit the world section to match your measured setup.
+#
+# World frame: origin at the BOTTOM-LEFT corner of the 10 ft x 10 ft arena,
+# +x to the right along the bottom edge, +y up along the left edge.
+# Meters, radians, CCW from +x.
+# tag_yaw = the direction the PRINTED FACE of the tag points
+# (a tag on the left edge facing into the arena has yaw 0).
+#
+# All positions below are PLACEHOLDERS read off the assignment figure.
+# Replace them with tape-measured values.
+hw4_navigator:
+  ros__parameters:
+    # ---------------- world ----------------
+    arena_size: [3.048, 3.048]          # 10 ft x 10 ft
+    # Obstacles as flat list of axis-aligned boxes: xmin, ymin, xmax, ymax.
+    # Default: 1.5 ft square centered in the arena.
+    obstacles: [1.2954, 1.2954, 1.7526, 1.7526]
+    # Start pose (x, y, theta) and goal (x, y) on the diagonal.
+    # Start faces the goal along the diagonal (135 deg).
+    start: [2.4384, 0.6096, 2.3562]     # 2 ft from the right and bottom edges
+    goal:  [0.6096, 2.4384]             # 2 ft from the left and top edges
+
+    # Robot footprint: radius of the circle that encloses the robot, measured
+    # from the center of rotation. safety_margin is extra room on top of it.
+    robot_radius: 0.15
+    safety_margin: 0.05
+
+    # ---------------- landmarks ----------------
+    # Every tag needs its OWN AprilTag ID. The figure reuses LM1-LM4 for the
+    # obstacle; here those are IDs 8-11. Check the IDs printed on your tags.
+    #   0 LM1 top edge, left      (faces down, -y)
+    #   1 LM4 top edge, right     (faces down)
+    #   2 LM3 right edge, top     (faces left, -x)
+    #   3 LM5 right edge, bottom  (faces left)
+    #   4 LM6 bottom edge, right  (faces up, +y)
+    #   5 LM7 bottom edge, left   (faces up)
+    #   6 LM2 left edge, bottom   (faces right, +x)
+    #   7 LM8 left edge, top      (faces right)
+    #   8 obstacle right face  (figure LM1, faces +x)
+    #   9 obstacle top face    (figure LM2, faces +y)
+    #  10 obstacle bottom face (figure LM3, faces -y)
+    #  11 obstacle left face   (figure LM4, faces -x)
+    tag_ids: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]
+    tag_x:   [0.6096, 2.4384, 3.048,  3.048,  2.4384, 0.6096, 0.0,    0.0,
+              1.7526, 1.524,  1.524,  1.2954]
+    tag_y:   [3.048,  3.048,  2.4384, 0.6096, 0.0,    0.0,    0.6096, 2.4384,
+              1.524,  1.7526, 1.2954, 1.524]
+    tag_yaw: [-1.5708, -1.5708, 3.14159, 3.14159, 1.5708, 1.5708, 0.0, 0.0,
+              0.0, 1.5708, -1.5708, 3.14159]
+    tag_size: 0.163
+    tag_family: "36h11"
+
+    # ---------------- planning ----------------
+    planner: "safe"            # "safe" (Voronoi) or "fast" (visibility graph)
+    grid_res: 0.02             # m, grid cell size for the Voronoi planner
+    simplify_tol: 0.15         # m, max sideways deviation when simplifying the safe path
+    clearance_slack: 0.03      # m, clearance the simplified safe path may give up
+    tie_tol: 0.02              # paths within 2% of the best length count as ties;
+                               # ties go to the path that sees more tags
+
+    # Camera model, only used to score how many tags a path can see.
+    camera_hfov: 1.0           # rad, horizontal field of view
+    max_tag_dist: 2.5          # m
+    max_tag_view_angle: 1.05   # rad, how far off-axis a tag can still be read
+
+    # ---------------- motion (from HW2/HW3) ----------------
+    camera_offset_x: 0.10
+    camera_offset_y: 0.0
+    image_is_rectified: false
+    drive_left: 0.32
+    drive_right: 0.40
+    drive_speed: 0.495
+    turn_cmd: 0.3
+    turn_rate: 2.051
+    turn_rate_left: 1.963
+    turn_rate_right: 2.138
+    step_time: 1.0
+    settle_time: 0.4
+    step_overhead: 1.0         # s per stop-and-go step (settle + photo), for time estimates
