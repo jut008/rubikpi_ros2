@@ -364,11 +364,34 @@ def simplify(world, pts, tol, slack):
             continue
         dev = point_segment_distance(pts[i + 1:j], pts[i], pts[j])
         k = i + 1 + int(np.argmax(dev))
-        need = max(float(clear[i:j + 1].min()) - slack, world.r_inf)
+        orig = float(clear[i:j + 1].min())
+        # don't get closer than the original path did (minus slack), but never
+        # demand more than the original had: near a start or goal that sits
+        # inside the safety margin, the original itself is closer than r_inf
+        need = max(orig - slack, min(world.r_inf, orig))
         if dev.max() > tol or world.segment_clearance(pts[i], pts[j]) < need:
             keep.add(k)
             stack += [(i, k), (k, j)]
     return pts[sorted(keep)]
+
+
+def drop_short_legs(world, pts, min_leg):
+    """Remove interior points that make a leg shorter than min_leg, when the
+    resulting shortcut keeps the clearance (tiny legs mean tiny, unreliable turns)."""
+    pts = [tuple(p) for p in pts]
+    changed = True
+    while changed and len(pts) > 2:
+        changed = False
+        for k in range(1, len(pts) - 1):
+            if min(math.dist(pts[k - 1], pts[k]), math.dist(pts[k], pts[k + 1])) >= min_leg:
+                continue
+            old = min(world.segment_clearance(pts[k - 1], pts[k]),
+                      world.segment_clearance(pts[k], pts[k + 1]))
+            if world.segment_clearance(pts[k - 1], pts[k + 1]) >= min(old, world.r_inf):
+                del pts[k]
+                changed = True
+                break
+    return np.array(pts)
 
 
 def plan_safe(world):
@@ -414,7 +437,8 @@ def plan_safe(world):
         cells = rs[:-1] + c + rg[::-1][1:]
         raw = np.array([world.start[:2]] + [grid.xy(x) for x in cells[1:-1]] + [world.goal])
         raws.append(raw)
-        simps.append(simplify(world, raw, tol, slack))
+        simps.append(drop_short_legs(world, simplify(world, raw, tol, slack),
+                                     float(p.get('min_leg', 0.15))))
 
     best = pick(world, simps, float(p.get('tie_tol', 0.02)))
     i = next(k for k, s in enumerate(simps) if s is best)
@@ -461,12 +485,15 @@ def plan_fast(world):
     cspace = [inflate(o, r) for o in world.obstacles]
     bounds = (r, r, world.W - r, world.H - r)       # where the robot center may go
 
-    def in_free(q):
-        return (bounds[0] <= q[0] <= bounds[2] and bounds[1] <= q[1] <= bounds[3]
+    def in_free(q, b=bounds):
+        return (b[0] <= q[0] <= b[2] and b[1] <= q[1] <= b[3]
                 and not any(c[0] < q[0] < c[2] and c[1] < q[1] < c[3] for c in cspace))
 
     nodes = [tuple(world.start[:2]), tuple(world.goal)]
-    if not all(in_free(q) for q in nodes):
+    # The robot starts and ends where it is put: the start and goal only need to
+    # clear the walls by robot_radius (not the margin) and stay out of the boxes.
+    rr = world.robot_radius
+    if not all(in_free(q, (rr, rr, world.W - rr, world.H - rr)) for q in nodes):
         raise ValueError('start or goal is inside the configuration-space obstacles')
     e = 1e-3     # nudge corners outward so edges along an obstacle side are not "inside" it
     for x0, y0, x1, y1 in cspace:

@@ -35,6 +35,7 @@ setup(
             'velocity_control = robot_control.velocity_control:main',
             'hw2_navigator = robot_control.hw2_navigator:main',
             'hw3_slam = robot_control.hw3_slam:main',
+            'hw4_navigator = robot_control.hw4_navigator:main',
         ],
     },
 )

@@ -7,19 +7,19 @@
 # tag_yaw = the direction the PRINTED FACE of the tag points
 # (a tag on the left edge facing into the arena has yaw 0).
 #
-# All positions below are PLACEHOLDERS read off the assignment figure.
-# Replace them with tape-measured values.
+# Obstacle and tag positions are tape-measured (Nov 20). Start and goal are
+# still the diagonal placeholders: set them to where you put the robot.
 hw4_navigator:
   ros__parameters:
     # ---------------- world ----------------
     arena_size: [3.048, 3.048]          # 10 ft x 10 ft
     # Obstacles as flat list of axis-aligned boxes: xmin, ymin, xmax, ymax.
-    # Default: 1.5 ft square centered in the arena.
-    obstacles: [1.2954, 1.2954, 1.7526, 1.7526]
+    # Measured: 1 ft 9 in x 1 ft 4 in, x 3'10"-5'7", y 4'-5'4" from the SW corner.
+    obstacles: [1.1684, 1.2192, 1.7018, 1.6256]
     # Start pose (x, y, theta) and goal (x, y) on the diagonal.
-    # Start faces the goal along the diagonal (135 deg).
-    start: [2.4384, 0.6096, 2.3562]     # 2 ft from the right and bottom edges
-    goal:  [0.6096, 2.4384]             # 2 ft from the left and top edges
+    # Start faces north (tag 0), 90 deg.
+    start: [2.7432, 0.3175, 1.5708]     # 12 in W of tag 9 (12 in from the E wall), 12.5 in N of the S wall
+    goal:  [0.3048, 2.8067]             # 12 in E of tag 7 (12 in from the W wall), 9.5 in S of the N wall
 
     # Robot footprint: radius of the circle that encloses the robot, measured
     # from the center of rotation. safety_margin is extra room on top of it.
@@ -27,35 +27,33 @@ hw4_navigator:
     safety_margin: 0.12
 
     # ---------------- landmarks ----------------
-    # Every tag needs its OWN AprilTag ID. The figure reuses LM1-LM4 for the
-    # obstacle; here those are IDs 8-11. Check the IDs printed on your tags.
-    #   0 LM1 top edge, left      (faces down, -y)
-    #   1 LM4 top edge, right     (faces down)
-    #   2 LM3 right edge, top     (faces left, -x)
-    #   3 LM5 right edge, bottom  (faces left)
-    #   4 LM6 bottom edge, right  (faces up, +y)
-    #   5 LM7 bottom edge, left   (faces up)
-    #   6 LM2 left edge, bottom   (faces right, +x)
-    #   7 LM8 left edge, top      (faces right)
-    #   8 obstacle right face  (figure LM1, faces +x)
-    #   9 obstacle top face    (figure LM2, faces +y)
-    #  10 obstacle bottom face (figure LM3, faces -y)
-    #  11 obstacle left face   (figure LM4, faces -x)
+    # Measured (inches from the nearest walls, converted to m):
+    #   6  north wall, 12.5 in from the W wall (faces -y)
+    #   7  west wall, 11.5 in from the N wall (faces +x)
+    #   0  10 in from the E wall, 5 in BEHIND the north wall line (faces -y)
+    #   4  east wall, 10 in from the N wall (faces -x)
+    #   9  east wall, 7.5 in from the S wall (faces -x)
+    #   8  south wall, 13 in from the E wall (faces +y)
+    #  10  south wall, 13 in from the W wall (faces +y)
+    #  11  west wall, 7.5 in from the S wall (faces +x)
+    #   1  obstacle west face, 3'10" from the W wall (faces -x)
+    #   3  obstacle east face, 4'5" from the E wall (faces +x)
+    #   2  obstacle north face, 4'8" from the N wall (faces +y)
+    #   5  obstacle south face, 4' from the S wall (faces -y)
+    # (obstacle tags assumed centered on their faces)
     tag_ids: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]
-    tag_x:   [0.6096, 2.4384, 3.048,  3.048,  2.4384, 0.6096, 0.0,    0.0,
-              1.7526, 1.524,  1.524,  1.2954]
-    tag_y:   [3.048,  3.048,  2.4384, 0.6096, 0.0,    0.0,    0.6096, 2.4384,
-              1.524,  1.7526, 1.2954, 1.524]
-    tag_yaw: [-1.5708, -1.5708, 3.14159, 3.14159, 1.5708, 1.5708, 0.0, 0.0,
-              0.0, 1.5708, -1.5708, 3.14159]
-    tag_size: 0.157
+    tag_x:   [2.7940, 1.1684, 1.4351, 1.7018, 3.0480, 1.4351, 0.3175, 0.0000, 2.7178, 3.0480, 0.3302, 0.0000]
+    tag_y:   [3.1750, 1.4224, 1.6256, 1.4224, 2.7940, 1.2192, 3.0480, 2.7559, 0.0000, 0.1905, 0.0000, 0.1905]
+    tag_yaw: [-1.5708, 3.1416, 1.5708, 0.0000, 3.1416, -1.5708, -1.5708, 0.0000, 1.5708, 3.1416, 1.5708, 0.0000]
+    tag_size: 0.127
     tag_family: "36h11"
 
     # ---------------- planning ----------------
     planner: "safe"            # "safe" (Voronoi) or "fast" (visibility graph)
     grid_res: 0.02             # m, grid cell size for the Voronoi planner
-    simplify_tol: 0.2         # m, max sideways deviation when simplifying the safe path
-    clearance_slack: 0.03      # m, clearance the simplified safe path may give up
+    simplify_tol: 0.25         # m, max sideways deviation when simplifying the safe path
+    clearance_slack: 0.10      # m, clearance the simplified safe path may give up (fewer, bigger turns)
+    min_leg: 0.15              # m, merge waypoints closer than this (tiny legs = tiny turns)
     tie_tol: 0.02              # paths within 2% of the best length count as ties;
                                # ties go to the path that sees more tags
 
@@ -73,10 +71,40 @@ hw4_navigator:
     drive_speed: 0.40
     turn_cmd: 0.3
     turn_rate: 2.051
-    turn_rate_left: 1.963
-    turn_rate_right: 2.138
+    turn_rate_left: 1.81       # HW3 45-deg calibration (was 1.963)
+    turn_rate_right: 1.88      # (was 2.138)
     step_time: 0.25
     settle_time: 0.4
     step_overhead: 1.0         # s per stop-and-go step (settle + photo), for time estimates
 
     drive_curve_deg_per_m: 15.0
+    min_step_time: 0.10
+
+    # ---------------- navigator (hw4_navigator.py) ----------------
+    detect_max_dist: 4.0       # m, ignore detections farther than this
+    max_reproj_err: 5.0        # px
+    pos_tol: 0.05
+    reach_radius: 0.10         # m, a waypoint counts as reached within this (sideways)
+    goal_tol: 0.08             # m, same for the goal
+    ang_tol: 0.20
+    heading_tol: 0.25
+    max_turn_step_deg: 45.0
+    back_up_deg: 90.0
+    max_steps_per_waypoint: 60
+    replan: true               # re-plan from the current pose if a step gets too close
+    max_replans: 5
+
+    # EKF: HW3 noise values. tag_sigma = how well the tags were taped (1-sigma, m);
+    # start_sigma = how well the robot was placed at the start (m, m, rad).
+    k_s: 0.05
+    k_theta: 0.25
+    k_s_theta: 0.2
+    min_sigma_s: 0.005
+    min_sigma_theta: 0.05
+    sigma_r0: 0.02
+    k_r: 0.03
+    sigma_b_deg: 2.0
+    gate: 9.21
+    tag_sigma: 0.02
+    start_sigma: [0.03, 0.03, 0.05]
+    log_dir: "/home/ubuntu/hw4_logs"
